@@ -25,7 +25,6 @@ let membersSidebarVisible = true;
 let isLoggedIn = false;
 
 function safeEmit(event, dataOrCallback, maybeCallback) {
-  // safeEmit('event', data, callback) veya safeEmit('event', callback) destekle
   let data, callback;
   if (typeof dataOrCallback === 'function') {
     data = undefined;
@@ -36,6 +35,7 @@ function safeEmit(event, dataOrCallback, maybeCallback) {
   }
 
   const doEmit = () => {
+    console.log(`📤 Gönderiliyor: ${event}`, data ? JSON.stringify(data).substring(0, 100) : '');
     if (data !== undefined && callback) {
       socket.emit(event, data, callback);
     } else if (data !== undefined) {
@@ -48,31 +48,68 @@ function safeEmit(event, dataOrCallback, maybeCallback) {
   };
 
   if (!isLoggedIn) {
-    console.warn('⚠️ Henüz giriş yapılmadı, bekleniyor...', event);
-    let attempts = 0;
-    const waitForLogin = setInterval(() => {
-      attempts++;
+    console.warn(`⏳ Login bekleniyor [${event}]... isLoggedIn=${isLoggedIn}, socket.connected=${socket.connected}`);
+
+    // Login olmamışsa önce login'i tetikle
+    if (!socket.connected) {
+      console.warn('⚠️ Socket bağlı değil!');
+      if (callback) callback({ success: false, error: 'Bağlantı yok' });
+      return;
+    }
+
+    let waited = 0;
+    const waitInterval = setInterval(() => {
+      waited += 100;
       if (isLoggedIn) {
-        clearInterval(waitForLogin);
+        clearInterval(waitInterval);
         doEmit();
+      } else if (waited >= 5000) {
+        clearInterval(waitInterval);
+        console.error(`❌ Zaman aşımı [${event}] - Login tamamlanamadı`);
+        showToast('Oturum hatası, sayfa yenileniyor...', 'error');
+        setTimeout(() => location.reload(), 1500);
       }
-      if (attempts > 50) {
-        clearInterval(waitForLogin);
-        console.error('❌ Login zaman aşımı:', event);
-        if (callback) callback({ success: false, error: 'Oturum zaman aşımı' });
-      }
-    }, 200);
+    }, 100);
     return;
   }
+
   doEmit();
 }
 
 function initApp() {
   const userData = sessionStorage.getItem('user');
-  if (!userData) {
+  const savedPassword = sessionStorage.getItem('_p');
+
+  if (!userData || !savedPassword) {
     window.location.href = '/';
     return;
   }
+
+  currentUser = JSON.parse(userData);
+
+  setupInputListeners();
+  setupSocketListeners();
+  setupGlobalListeners();
+  initEmojiPicker();
+
+  renderUserPanel();
+  document.getElementById('welcomeName').textContent = currentUser.username;
+
+  // connect eventi hem ilk bağlantıda hem reconnect'te tetiklenir
+  socket.on('connect', () => {
+    console.log('🟢 Socket bağlandı:', socket.id);
+    loginDone = false;
+    isLoggedIn = false;
+    doLogin();
+  });
+
+  // Eğer socket zaten bağlıysa connect gelmez, manuel tetikle
+  if (socket.connected) {
+    loginDone = false;
+    isLoggedIn = false;
+    doLogin();
+  }
+}
 
   currentUser = JSON.parse(userData);
 
@@ -1585,58 +1622,18 @@ const style = document.createElement('style');
 style.textContent = `@keyframes fadeOut { from { opacity: 1; max-height: 200px; } to { opacity: 0; max-height: 0; padding: 0; margin: 0; } }`;
 document.head.appendChild(style);
 
-// ===== RE-LOGIN ON RECONNECT =====
-// Not: İlk 'connect' eventi initApp() içinde dinleniyor.
-// Buradaki sadece RECONNECT durumları için.
-
-socket.io.on('reconnect', (attemptNumber) => {
-  console.log(`🔄 Yeniden bağlandı (deneme: ${attemptNumber})`);
-  isLoggedIn = false;
-
-  const savedPassword = sessionStorage.getItem('_p');
-  if (currentUser && savedPassword) {
-    socket.emit('login', {
-      email: currentUser.email,
-      password: savedPassword
-    }, (response) => {
-      if (response.success) {
-        isLoggedIn = true;
-        currentUser = response.user;
-        servers = response.servers || [];
-        friends = response.friends || [];
-        pendingRequests = response.pendingRequests || [];
-        dmContacts = response.dmContacts || [];
-        renderServerList();
-        renderDMContacts();
-        updatePendingBadge();
-
-        // Aktif sunucu/kanal varsa yeniden yükle
-        if (activeServer) {
-          const updatedServer = servers.find(s => s.id === activeServer.id);
-          if (updatedServer) {
-            activeServer = updatedServer;
-            renderChannelList(activeServer);
-            renderMembers(activeServer.members || []);
-            if (activeChannel) {
-              socket.emit('get-messages', { channelId: activeChannel.id, limit: 50 }, (res) => {
-                if (res.success) renderMessages(res.messages, 'messagesList');
-              });
-            }
-          }
-        }
-        showToast('Bağlantı yeniden kuruldu!', 'success');
-      } else {
-        sessionStorage.clear();
-        window.location.href = '/';
-      }
-    });
-  }
-});
-
+// ===== DISCONNECT & RECONNECT =====
 socket.on('disconnect', (reason) => {
   console.log('🔴 Bağlantı koptu:', reason);
   isLoggedIn = false;
-  showToast('Bağlantı koptu, yeniden bağlanılıyor...', 'error');
+  if (reason !== 'io client disconnect') {
+    showToast('Bağlantı koptu, yeniden bağlanılıyor...', 'error');
+  }
+});
+
+socket.io.on('reconnect', (attemptNumber) => {
+  console.log(`🔄 Yeniden bağlandı (deneme: ${attemptNumber})`);
+  // connect eventi zaten doLogin'i tetikleyecek (initApp içinde)
 });
 
 socket.io.on('reconnect_attempt', (attempt) => {
