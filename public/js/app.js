@@ -22,7 +22,26 @@ let selectedMessageChannelId = null;
 let membersSidebarVisible = true;
 
 // ===== INIT =====
-(function init() {
+let isLoggedIn = false;
+
+function safeEmit(event, data, callback) {
+  if (!isLoggedIn) {
+    console.warn('⚠️ Henüz giriş yapılmadı, bekleniyor...', event);
+    // Login tamamlanana kadar bekle
+    const waitForLogin = setInterval(() => {
+      if (isLoggedIn) {
+        clearInterval(waitForLogin);
+        socket.emit(event, data, callback);
+      }
+    }, 200);
+    // 10 saniye sonra vazgeç
+    setTimeout(() => clearInterval(waitForLogin), 10000);
+    return;
+  }
+  socket.emit(event, data, callback);
+}
+
+function initApp() {
   const userData = sessionStorage.getItem('user');
   if (!userData) {
     window.location.href = '/';
@@ -30,31 +49,57 @@ let membersSidebarVisible = true;
   }
 
   currentUser = JSON.parse(userData);
-  servers = JSON.parse(sessionStorage.getItem('servers') || '[]');
-  friends = JSON.parse(sessionStorage.getItem('friends') || '[]');
-  pendingRequests = JSON.parse(sessionStorage.getItem('pendingRequests') || '[]');
-  dmContacts = JSON.parse(sessionStorage.getItem('dmContacts') || '[]');
 
-  // Re-login through socket
-  socket.emit('login', {
-    email: currentUser.email,
-    password: '__session__'
-  }, () => {});
-
-  // Render UI
-  renderUserPanel();
-  renderServerList();
-  renderDMContacts();
-  updatePendingBadge();
-
-  document.getElementById('welcomeName').textContent = currentUser.username;
-
-  // Setup event listeners
+  // Setup event listeners (sadece bir kez)
   setupInputListeners();
   setupSocketListeners();
   setupGlobalListeners();
   initEmojiPicker();
-})();
+
+  // Socket bağlantısı hazır olunca login yap
+  if (socket.connected) {
+    doLogin();
+  } else {
+    socket.on('connect', () => {
+      doLogin();
+    });
+  }
+}
+
+function doLogin() {
+  const savedPassword = sessionStorage.getItem('_p');
+  if (!savedPassword || !currentUser) {
+    window.location.href = '/';
+    return;
+  }
+
+  socket.emit('login', { email: currentUser.email, password: savedPassword }, (response) => {
+    if (response.success) {
+      isLoggedIn = true;
+      currentUser = response.user;
+      servers = response.servers || [];
+      friends = response.friends || [];
+      pendingRequests = response.pendingRequests || [];
+      dmContacts = response.dmContacts || [];
+
+      // Render UI
+      renderUserPanel();
+      renderServerList();
+      renderDMContacts();
+      updatePendingBadge();
+      document.getElementById('welcomeName').textContent = currentUser.username;
+
+      console.log('✅ Oturum açıldı:', currentUser.username);
+    } else {
+      console.error('❌ Login hatası:', response.error);
+      sessionStorage.clear();
+      window.location.href = '/';
+    }
+  });
+}
+
+// Sayfa yüklenince başlat
+initApp();
 
 // ===== RENDER FUNCTIONS =====
 function renderUserPanel() {
@@ -312,14 +357,11 @@ function selectChannel(channel) {
   showView('chat');
 
   // Load messages
-  socket.emit('get-messages', { channelId: channel.id, limit: 50 }, (response) => {
+  safeEmit('get-messages', { channelId: channel.id, limit: 50 }, (response) => {
     if (response.success) {
       renderMessages(response.messages, 'messagesList');
     }
   });
-
-  // Join channel room
-  socket.emit('join-channel', { channelId: channel.id });
 }
 
 function showView(view) {
@@ -489,7 +531,7 @@ function sendFriendRequest() {
   const username = input.value.trim();
   if (!username) return;
 
-  socket.emit('send-friend-request', { username }, (response) => {
+  safeEmit('send-friend-request', { username }, (response) => {
     if (response.success) {
       showToast('Arkadaşlık isteği gönderildi!', 'success');
       input.value = '';
@@ -500,7 +542,7 @@ function sendFriendRequest() {
 }
 
 function acceptFriend(friendId) {
-  socket.emit('accept-friend-request', { friendId }, (response) => {
+  safeEmit('accept-friend-request', { friendId }, (response) => {
     if (response.success) {
       pendingRequests = pendingRequests.filter(r => r.id !== friendId);
       if (response.friend) friends.push(response.friend);
@@ -512,7 +554,7 @@ function acceptFriend(friendId) {
 }
 
 function rejectFriend(friendId) {
-  socket.emit('reject-friend-request', { friendId }, (response) => {
+  safeEmit('reject-friend-request', { friendId }, (response) => {
     if (response.success) {
       pendingRequests = pendingRequests.filter(r => r.id !== friendId);
       updatePendingBadge();
@@ -524,7 +566,7 @@ function rejectFriend(friendId) {
 function removeFriend(friendId) {
   if (!confirm('Bu arkadaşı silmek istediğine emin misin?')) return;
 
-  socket.emit('remove-friend', { friendId }, (response) => {
+  safeEmit('remove-friend', { friendId }, (response) => {
     if (response.success) {
       friends = friends.filter(f => f.id !== friendId);
       showFriends('all');
@@ -572,7 +614,7 @@ function openDM(user) {
   renderDMContacts();
 
   // Load messages
-  socket.emit('get-dms', { userId: user.id, limit: 50 }, (response) => {
+  safeEmit('get-dms', { userId: user.id, limit: 50 }, (response) => {
     if (response.success) {
       renderMessages(response.messages, 'dmMessagesList', true);
     }
@@ -583,7 +625,7 @@ function showDMList() {
   document.getElementById('navFriends').classList.remove('active');
   document.getElementById('navDMs').classList.add('active');
 
-  socket.emit('get-dm-contacts', (response) => {
+  safeEmit('get-dm-contacts', {}, (response) => {
     if (response.success) {
       dmContacts = response.contacts;
       renderDMContacts();
@@ -619,7 +661,7 @@ function createServer() {
   const name = document.getElementById('newServerName').value.trim();
   if (!name) return showToast('Sunucu adı gerekli', 'error');
 
-  socket.emit('create-server', { name }, (response) => {
+  safeEmit('create-server', { name }, (response) => {
     if (response.success) {
       servers.push(response.server);
       renderServerList();
@@ -637,7 +679,7 @@ function joinServer() {
   const code = document.getElementById('inviteCodeInput').value.trim();
   if (!code) return showToast('Davet kodu gerekli', 'error');
 
-  socket.emit('join-server', { inviteCode: code }, (response) => {
+  safeEmit('join-server', { inviteCode: code }, (response) => {
     if (response.success) {
       servers.push(response.server);
       renderServerList();
@@ -671,7 +713,7 @@ function handleLeaveServer() {
   if (!activeServer) return;
   if (!confirm(`"${activeServer.name}" sunucusundan ayrılmak istediğine emin misin?`)) return;
 
-  socket.emit('leave-server', { serverId: activeServer.id }, (response) => {
+  safeEmit('leave-server', { serverId: activeServer.id }, (response) => {
     if (response.success) {
       servers = servers.filter(s => s.id !== activeServer.id);
       renderServerList();
@@ -693,7 +735,7 @@ function createChannel() {
   const name = document.getElementById('newChannelName').value.trim().toLowerCase().replace(/\s+/g, '-');
   if (!name) return showToast('Kanal adı gerekli', 'error');
 
-  socket.emit('create-channel', { serverId: activeServer.id, name }, (response) => {
+  safeEmit('create-channel', { serverId: activeServer.id, name }, (response) => {
     if (response.success) {
       activeServer.channels.push(response.channel);
       renderChannelList(activeServer);
@@ -713,7 +755,7 @@ function sendCurrentMessage() {
   const content = input.value.trim();
   if (!content || !activeChannel) return;
 
-  socket.emit('send-message', { channelId: activeChannel.id, content }, (response) => {
+  safeEmit('send-message', { channelId: activeChannel.id, content }, (response) => {
     if (response.success) {
       input.value = '';
       input.style.height = 'auto';
@@ -727,7 +769,7 @@ function sendCurrentDM() {
   const content = input.value.trim();
   if (!content || !activeDMUser) return;
 
-  socket.emit('send-dm', { receiverId: activeDMUser.id, content }, (response) => {
+  safeEmit('send-dm', { receiverId: activeDMUser.id, content }, (response) => {
     if (response.success) {
       input.value = '';
       input.style.height = 'auto';
@@ -1165,7 +1207,7 @@ function toggleStatusMenu() {
 
 function changeStatus(status) {
   currentUser.status = status;
-  socket.emit('update-status', { status });
+  safeEmit('update-status', { status }, () => {});
   renderUserPanel();
   document.getElementById('statusMenu').classList.add('hidden');
 }
@@ -1189,7 +1231,7 @@ function saveSettings() {
   const username = document.getElementById('settingsUsername').value.trim();
   const customStatus = document.getElementById('settingsCustomStatus').value.trim();
 
-  socket.emit('update-profile', { username, custom_status: customStatus }, (response) => {
+  safeEmit('update-profile', { username, custom_status: customStatus }, (response) => {
     if (response.success) {
       currentUser = response.user;
       renderUserPanel();
@@ -1218,7 +1260,7 @@ function searchUsers() {
   }
 
   searchTimeout = setTimeout(() => {
-    socket.emit('search-users', { query }, (response) => {
+    safeEmit('search-users', { query }, (response) => {
       if (response.success) {
         const container = document.getElementById('searchResults');
         container.innerHTML = '';
@@ -1248,7 +1290,8 @@ function searchUsers() {
 }
 
 function handleLogout() {
-  socket.emit('update-status', { status: 'offline' });
+  socket.emit('update-status', { status: 'offline' }, () => {});
+  isLoggedIn = false;
   sessionStorage.clear();
   window.location.href = '/';
 }
@@ -1456,49 +1499,56 @@ style.textContent = `@keyframes fadeOut { from { opacity: 1; max-height: 200px; 
 document.head.appendChild(style);
 
 // ===== RE-LOGIN ON RECONNECT =====
-socket.on('connect', () => {
-  console.log('🟢 Bağlantı kuruldu:', socket.id);
+// Not: İlk 'connect' eventi initApp() içinde dinleniyor.
+// Buradaki sadece RECONNECT durumları için.
 
-  if (currentUser && currentUser.email) {
-    // Yeniden bağlandığında oturumu yeniden kur
-    const savedPassword = sessionStorage.getItem('_p');
-    if (savedPassword) {
-      socket.emit('login', {
-        email: currentUser.email,
-        password: savedPassword
-      }, (response) => {
-        if (response.success) {
-          servers = response.servers || [];
-          friends = response.friends || [];
-          pendingRequests = response.pendingRequests || [];
-          dmContacts = response.dmContacts || [];
-          renderServerList();
-          renderDMContacts();
-          updatePendingBadge();
+socket.io.on('reconnect', (attemptNumber) => {
+  console.log(`🔄 Yeniden bağlandı (deneme: ${attemptNumber})`);
+  isLoggedIn = false;
 
-          // Aktif sunucu/kanal varsa yeniden yükle
-          if (activeServer) {
-            const updatedServer = servers.find(s => s.id === activeServer.id);
-            if (updatedServer) {
-              activeServer = updatedServer;
-              renderChannelList(activeServer);
-              renderMembers(activeServer.members || []);
-              if (activeChannel) {
-                socket.emit('get-messages', { channelId: activeChannel.id, limit: 50 }, (res) => {
-                  if (res.success) renderMessages(res.messages, 'messagesList');
-                });
-              }
+  const savedPassword = sessionStorage.getItem('_p');
+  if (currentUser && savedPassword) {
+    socket.emit('login', {
+      email: currentUser.email,
+      password: savedPassword
+    }, (response) => {
+      if (response.success) {
+        isLoggedIn = true;
+        currentUser = response.user;
+        servers = response.servers || [];
+        friends = response.friends || [];
+        pendingRequests = response.pendingRequests || [];
+        dmContacts = response.dmContacts || [];
+        renderServerList();
+        renderDMContacts();
+        updatePendingBadge();
+
+        // Aktif sunucu/kanal varsa yeniden yükle
+        if (activeServer) {
+          const updatedServer = servers.find(s => s.id === activeServer.id);
+          if (updatedServer) {
+            activeServer = updatedServer;
+            renderChannelList(activeServer);
+            renderMembers(activeServer.members || []);
+            if (activeChannel) {
+              socket.emit('get-messages', { channelId: activeChannel.id, limit: 50 }, (res) => {
+                if (res.success) renderMessages(res.messages, 'messagesList');
+              });
             }
           }
-          showToast('Bağlantı yeniden kuruldu!', 'success');
         }
-      });
-    }
+        showToast('Bağlantı yeniden kuruldu!', 'success');
+      } else {
+        sessionStorage.clear();
+        window.location.href = '/';
+      }
+    });
   }
 });
 
 socket.on('disconnect', (reason) => {
   console.log('🔴 Bağlantı koptu:', reason);
+  isLoggedIn = false;
   showToast('Bağlantı koptu, yeniden bağlanılıyor...', 'error');
 });
 
