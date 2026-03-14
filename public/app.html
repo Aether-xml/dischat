@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChatCord</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Server Sidebar -->
+    <nav class="server-sidebar" id="serverSidebar">
+      <div class="server-icon home-icon active" id="homeBtn" title="Ana Sayfa" onclick="showHome()">
+        <i class="fas fa-comments"></i>
+      </div>
+      <div class="sidebar-separator"></div>
+      <div id="serverList"></div>
+      <div class="server-icon add-server" title="Sunucu Ekle" onclick="showServerModal()">
+        <i class="fas fa-plus"></i>
+      </div>
+    </nav>
+
+    <!-- Channel Sidebar -->
+    <aside class="channel-sidebar" id="channelSidebar">
+      <!-- Home View -->
+      <div class="sidebar-content" id="homeView">
+        <div class="sidebar-header">
+          <div class="search-bar" onclick="showSearchModal()">
+            <i class="fas fa-search"></i>
+            <span>Sohbet bul veya başlat</span>
+          </div>
+        </div>
+
+        <div class="sidebar-nav">
+          <div class="nav-item active" onclick="showFriends('all')" id="navFriends">
+            <i class="fas fa-user-friends"></i>
+            <span>Arkadaşlar</span>
+          </div>
+          <div class="nav-item" onclick="showDMList()" id="navDMs">
+            <i class="fas fa-inbox"></i>
+            <span>Direkt Mesajlar</span>
+            <span class="badge hidden" id="dmBadge">0</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span>DİREKT MESAJLAR</span>
+            <button onclick="showSearchModal()" title="DM Oluştur"><i class="fas fa-plus"></i></button>
+          </div>
+          <div id="dmContactList" class="member-list"></div>
+        </div>
+      </div>
+
+      <!-- Server View -->
+      <div class="sidebar-content hidden" id="serverView">
+        <div class="sidebar-header server-name-header">
+          <h3 id="currentServerName">Sunucu Adı</h3>
+          <button class="server-dropdown-btn" onclick="toggleServerMenu()">
+            <i class="fas fa-chevron-down"></i>
+          </button>
+
+          <!-- Server Dropdown Menu -->
+          <div class="server-dropdown hidden" id="serverDropdown">
+            <div class="dropdown-item" onclick="showInviteModal()">
+              <i class="fas fa-user-plus"></i>
+              <span>İnsanları Davet Et</span>
+            </div>
+            <div class="dropdown-item" onclick="showCreateChannelModal()">
+              <i class="fas fa-plus-circle"></i>
+              <span>Kanal Oluştur</span>
+            </div>
+            <div class="dropdown-separator"></div>
+            <div class="dropdown-item danger" onclick="handleLeaveServer()">
+              <i class="fas fa-sign-out-alt"></i>
+              <span>Sunucudan Ayrıl</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span>METİN KANALLARI</span>
+            <button onclick="showCreateChannelModal()" title="Kanal Oluştur"><i class="fas fa-plus"></i></button>
+          </div>
+          <div id="channelList" class="channel-list"></div>
+        </div>
+      </div>
+
+      <!-- User Panel -->
+      <div class="user-panel">
+        <div class="user-info">
+          <div class="user-avatar-container">
+            <div class="user-avatar" id="userAvatar"></div>
+            <div class="status-dot" id="userStatusDot"></div>
+          </div>
+          <div class="user-details">
+            <span class="username" id="userName"></span>
+            <span class="user-status-text" id="userStatusText">Çevrimiçi</span>
+          </div>
+        </div>
+        <div class="user-controls">
+          <button onclick="toggleStatusMenu()" title="Durum Değiştir"><i class="fas fa-circle" id="statusIcon"></i></button>
+          <button onclick="showSettingsModal()" title="Ayarlar"><i class="fas fa-cog"></i></button>
+          <button onclick="handleLogout()" title="Çıkış"><i class="fas fa-sign-out-alt"></i></button>
+        </div>
+
+        <!-- Status Menu -->
+        <div class="status-menu hidden" id="statusMenu">
+          <div class="status-option" onclick="changeStatus('online')">
+            <div class="status-circle online"></div>
+            <span>Çevrimiçi</span>
+          </div>
+          <div class="status-option" onclick="changeStatus('idle')">
+            <div class="status-circle idle"></div>
+            <span>Boşta</span>
+          </div>
+          <div class="status-option" onclick="changeStatus('dnd')">
+            <div class="status-circle dnd"></div>
+            <span>Rahatsız Etmeyin</span>
+          </div>
+          <div class="status-option" onclick="changeStatus('offline')">
+            <div class="status-circle offline-status"></div>
+            <span>Görünmez</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content" id="mainContent">
+      <!-- Welcome Screen -->
+      <div class="welcome-screen" id="welcomeScreen">
+        <div class="welcome-content">
+          <div class="welcome-icon">
+            <i class="fas fa-comments"></i>
+          </div>
+          <h2>Hoş Geldin, <span id="welcomeName"></span>!</h2>
+          <p>Bir sunucu seç veya arkadaşlarınla sohbet etmeye başla</p>
+          <div class="welcome-actions">
+            <button class="welcome-btn primary" onclick="showServerModal()">
+              <i class="fas fa-plus"></i>
+              Sunucu Oluştur
+            </button>
+            <button class="welcome-btn secondary" onclick="showJoinModal()">
+              <i class="fas fa-sign-in-alt"></i>
+              Sunucuya Katıl
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Friends View -->
+      <div class="friends-view hidden" id="friendsView">
+        <div class="main-header">
+          <div class="header-left">
+            <i class="fas fa-user-friends"></i>
+            <h3>Arkadaşlar</h3>
+            <div class="header-tabs">
+              <button class="tab active" onclick="showFriends('all')" id="tabAll">Tümü</button>
+              <button class="tab" onclick="showFriends('online')" id="tabOnline">Çevrimiçi</button>
+              <button class="tab" onclick="showFriends('pending')" id="tabPending">
+                Bekleyen
+                <span class="tab-badge hidden" id="pendingBadge">0</span>
+              </button>
+              <button class="tab green" onclick="showFriends('add')" id="tabAdd">Arkadaş Ekle</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="friends-content" id="friendsContent">
+          <!-- Dynamic content -->
+        </div>
+      </div>
+
+      <!-- Chat View -->
+      <div class="chat-view hidden" id="chatView">
+        <div class="main-header chat-header">
+          <div class="header-left">
+            <i class="fas fa-hashtag" id="chatIcon"></i>
+            <h3 id="chatTitle">kanal-adı</h3>
+            <span class="chat-topic" id="chatTopic"></span>
+          </div>
+          <div class="header-right">
+            <button onclick="toggleMemberSidebar()" title="Üyeler"><i class="fas fa-users"></i></button>
+            <button onclick="showPinnedMessages()" title="Sabitlenmiş"><i class="fas fa-thumbtack"></i></button>
+            <div class="search-box">
+              <input type="text" placeholder="Ara" id="messageSearch">
+              <i class="fas fa-search"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="chat-body">
+          <div class="messages-container" id="messagesContainer">
+            <div class="messages-start">
+              <div class="channel-welcome">
+                <div class="channel-welcome-icon">
+                  <i class="fas fa-hashtag"></i>
+                </div>
+                <h2 id="channelWelcomeTitle">kanal-adı</h2>
+                <p>Bu kanalın başlangıcı!</p>
+              </div>
+            </div>
+            <div id="messagesList"></div>
+          </div>
+
+          <div class="typing-indicator hidden" id="typingIndicator">
+            <div class="typing-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span id="typingText">Birisi yazıyor...</span>
+          </div>
+
+          <div class="message-input-container">
+            <div class="message-input-wrapper">
+              <button class="input-action" onclick="document.getElementById('fileInput').click()" title="Dosya Ekle">
+                <i class="fas fa-plus-circle"></i>
+              </button>
+              <input type="file" id="fileInput" hidden accept="image/*,video/*,.pdf,.txt,.zip">
+              <div class="input-field-wrapper">
+                <textarea id="messageInput" placeholder="Mesajını yaz..." rows="1" maxlength="2000"></textarea>
+              </div>
+              <div class="input-actions-right">
+                <button class="input-action" onclick="toggleEmojiPicker()" title="Emoji">
+                  <i class="fas fa-smile"></i>
+                </button>
+                <button class="input-action send-btn" onclick="sendCurrentMessage()" title="Gönder">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- File Preview -->
+            <div class="file-preview hidden" id="filePreview">
+              <div class="file-preview-content">
+                <img id="filePreviewImage" src="" alt="">
+                <div class="file-info">
+                  <span id="filePreviewName"></span>
+                  <span id="filePreviewSize"></span>
+                </div>
+                <button onclick="clearFilePreview()"><i class="fas fa-times"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DM Chat View -->
+      <div class="chat-view hidden" id="dmChatView">
+        <div class="main-header chat-header">
+          <div class="header-left">
+            <i class="fas fa-at" id="dmChatIcon"></i>
+            <h3 id="dmChatTitle">Kullanıcı</h3>
+            <div class="dm-status" id="dmUserStatus"></div>
+          </div>
+        </div>
+
+        <div class="chat-body">
+          <div class="messages-container" id="dmMessagesContainer">
+            <div class="messages-start">
+              <div class="dm-welcome">
+                <div class="dm-welcome-avatar" id="dmWelcomeAvatar"></div>
+                <h2 id="dmWelcomeTitle">Kullanıcı</h2>
+                <p>Bu sohbetin başlangıcı!</p>
+              </div>
+            </div>
+            <div id="dmMessagesList"></div>
+          </div>
+
+          <div class="typing-indicator hidden" id="dmTypingIndicator">
+            <div class="typing-dots">
+              <span></span><span></span><span></span>
+            </div>
+            <span id="dmTypingText">Birisi yazıyor...</span>
+          </div>
+
+          <div class="message-input-container">
+            <div class="message-input-wrapper">
+              <button class="input-action" onclick="document.getElementById('dmFileInput').click()">
+                <i class="fas fa-plus-circle"></i>
+              </button>
+              <input type="file" id="dmFileInput" hidden>
+              <div class="input-field-wrapper">
+                <textarea id="dmMessageInput" placeholder="Mesajını yaz..." rows="1" maxlength="2000"></textarea>
+              </div>
+              <div class="input-actions-right">
+                <button class="input-action" onclick="toggleEmojiPicker()" title="Emoji">
+                  <i class="fas fa-smile"></i>
+                </button>
+                <button class="input-action send-btn" onclick="sendCurrentDM()" title="Gönder">
+                  <i class="fas fa-paper-plane"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Members Sidebar -->
+    <aside class="members-sidebar" id="membersSidebar">
+      <div class="members-header">
+        <h4>Üyeler</h4>
+      </div>
+      <div id="membersList" class="member-list"></div>
+    </aside>
+  </div>
+
+  <!-- ===== MODALS ===== -->
+
+  <!-- Server Create/Join Modal -->
+  <div class="modal-overlay hidden" id="serverModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="serverModalTitle">Sunucu Oluştur</h3>
+        <button class="modal-close" onclick="closeModal('serverModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-tabs" id="serverModalTabs">
+          <button class="modal-tab active" onclick="switchServerModalTab('create')">Oluştur</button>
+          <button class="modal-tab" onclick="switchServerModalTab('join')">Katıl</button>
+        </div>
+
+        <!-- Create Server -->
+        <div id="createServerForm">
+          <div class="form-group">
+            <label>SUNUCU ADI</label>
+            <input type="text" id="newServerName" placeholder="Harika Sunucum" maxlength="50">
+          </div>
+          <button class="modal-btn primary" onclick="createServer()">
+            <i class="fas fa-plus"></i> Oluştur
+          </button>
+        </div>
+
+        <!-- Join Server -->
+        <div id="joinServerForm" class="hidden">
+          <div class="form-group">
+            <label>DAVET KODU</label>
+            <input type="text" id="inviteCodeInput" placeholder="Davet kodunu yapıştır">
+          </div>
+          <button class="modal-btn primary" onclick="joinServer()">
+            <i class="fas fa-sign-in-alt"></i> Katıl
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invite Modal -->
+  <div class="modal-overlay hidden" id="inviteModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Arkadaşlarını Davet Et</h3>
+        <button class="modal-close" onclick="closeModal('inviteModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-description">Bu davet kodunu arkadaşlarınla paylaş:</p>
+        <div class="invite-code-container">
+          <input type="text" id="inviteCodeDisplay" readonly>
+          <button onclick="copyInviteCode()" id="copyBtn">
+            <i class="fas fa-copy"></i> Kopyala
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Channel Modal -->
+  <div class="modal-overlay hidden" id="channelModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Kanal Oluştur</h3>
+        <button class="modal-close" onclick="closeModal('channelModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>KANAL ADI</label>
+          <input type="text" id="newChannelName" placeholder="yeni-kanal" maxlength="30">
+        </div>
+        <button class="modal-btn primary" onclick="createChannel()">
+          <i class="fas fa-plus"></i> Oluştur
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search / Add Friend Modal -->
+  <div class="modal-overlay hidden" id="searchModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Kullanıcı Ara</h3>
+        <button class="modal-close" onclick="closeModal('searchModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <input type="text" id="searchUserInput" placeholder="Kullanıcı adı ile ara..." oninput="searchUsers()">
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay hidden" id="settingsModal">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <h3><i class="fas fa-cog"></i> Ayarlar</h3>
+        <button class="modal-close" onclick="closeModal('settingsModal')"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <h4>Profil</h4>
+          <div class="form-group">
+            <label>KULLANICI ADI</label>
+            <input type="text" id="settingsUsername" maxlength="20">
+          </div>
+          <div class="form-group">
+            <label>ÖZEL DURUM</label>
+            <input type="text" id="settingsCustomStatus" placeholder="Ne yapıyorsun?" maxlength="50">
+          </div>
+          <button class="modal-btn primary" onclick="saveSettings()">
+            <i class="fas fa-save"></i> Kaydet
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Emoji Picker -->
+  <div class="emoji-picker hidden" id="emojiPicker">
+    <div class="emoji-header">
+      <input type="text" placeholder="Emoji ara..." id="emojiSearch" oninput="filterEmojis()">
+    </div>
+    <div class="emoji-grid" id="emojiGrid"></div>
+  </div>
+
+  <!-- Context Menu -->
+  <div class="context-menu hidden" id="contextMenu">
+    <div class="context-item" id="ctxEdit" onclick="editSelectedMessage()">
+      <i class="fas fa-edit"></i> Düzenle
+    </div>
+    <div class="context-item danger" id="ctxDelete" onclick="deleteSelectedMessage()">
+      <i class="fas fa-trash"></i> Sil
+    </div>
+    <div class="context-item" id="ctxCopy" onclick="copyMessageContent()">
+      <i class="fas fa-copy"></i> Kopyala
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
