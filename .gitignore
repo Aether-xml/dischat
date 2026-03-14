@@ -1,0 +1,8 @@
+node_modules/
+server/db/chat.db
+server/db/chat.db-wal
+server/db/chat.db-shm
+public/uploads/*
+!public/uploads/.gitkeep
+.env
+.DS_Store
