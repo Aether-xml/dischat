@@ -186,15 +186,22 @@ const dbOps = {
   },
 
   getUserByUsername(username) {
-    return db.prepare('SELECT id, username, email, avatar, status, custom_status FROM users WHERE username = ?').get(username);
+    return db.prepare('SELECT id, username, email, avatar, status, custom_status FROM users WHERE username = ? COLLATE NOCASE').get(username);
   },
 
   searchUsers(query, currentUserId) {
+    if (!query || query.length < 1) return [];
+    const searchTerm = `%${query.toLowerCase()}%`;
     return db.prepare(`
-      SELECT id, username, avatar, status FROM users
-      WHERE username LIKE ? AND id != ?
+      SELECT id, username, avatar, status, custom_status FROM users
+      WHERE LOWER(username) LIKE ? AND id != ?
+      ORDER BY
+        CASE WHEN LOWER(username) = ? THEN 0
+             WHEN LOWER(username) LIKE ? THEN 1
+             ELSE 2
+        END
       LIMIT 20
-    `).all(`%${query}%`, currentUserId);
+    `).all(searchTerm, currentUserId, query.toLowerCase(), `${query.toLowerCase()}%`);
   },
 
   // ===== SERVER OPERATIONS =====
@@ -222,6 +229,8 @@ const dbOps = {
 
     transaction();
 
+    console.log('🏠 Sunucu oluşturuldu:', name, '| Davet kodu:', inviteCode);
+
     return {
       id, name, icon, owner_id: ownerId, invite_code: inviteCode,
       channels: [{ id: channelId, name: 'genel', type: 'text', topic: '', position: 0 }]
@@ -229,8 +238,18 @@ const dbOps = {
   },
 
   joinServerByInvite(inviteCode, userId) {
-    const server = db.prepare('SELECT * FROM servers WHERE invite_code = ?').get(inviteCode);
-    if (!server) throw new Error('Geçersiz davet kodu');
+    const trimmedCode = (inviteCode || '').trim();
+    if (!trimmedCode) throw new Error('Davet kodu boş olamaz');
+
+    // Büyük/küçük harf duyarsız ara
+    const server = db.prepare('SELECT * FROM servers WHERE invite_code = ? COLLATE NOCASE').get(trimmedCode);
+    if (!server) {
+      // Tüm kodları listele debug için
+      const allServers = db.prepare('SELECT invite_code FROM servers').all();
+      console.log('Mevcut davet kodları:', allServers.map(s => s.invite_code));
+      console.log('Aranan kod:', trimmedCode);
+      throw new Error('Geçersiz davet kodu');
+    }
 
     const existing = db.prepare('SELECT * FROM server_members WHERE server_id = ? AND user_id = ?')
       .get(server.id, userId);
@@ -421,9 +440,16 @@ const dbOps = {
   // ===== FRIEND OPERATIONS =====
   sendFriendRequest(userId, friendId) {
     if (userId === friendId) throw new Error('Kendinize arkadaşlık isteği gönderemezsiniz');
+
     const existing = db.prepare('SELECT * FROM friends WHERE (user_id = ? AND friend_id = ?) OR (user_id = ? AND friend_id = ?)')
       .get(userId, friendId, friendId, userId);
-    if (existing) throw new Error('Zaten bir arkadaşlık isteği mevcut');
+
+    if (existing) {
+      if (existing.status === 'accepted') throw new Error('Zaten arkadaşsınız');
+      if (existing.status === 'pending' && existing.user_id === userId) throw new Error('Zaten istek gönderilmiş');
+      if (existing.status === 'pending' && existing.friend_id === userId) throw new Error('Bu kişi size zaten istek göndermiş, bekleyen isteklerinizi kontrol edin');
+      throw new Error('Zaten bir arkadaşlık isteği mevcut');
+    }
 
     db.prepare('INSERT INTO friends (user_id, friend_id, status) VALUES (?, ?, ?)')
       .run(userId, friendId, 'pending');
