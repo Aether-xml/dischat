@@ -24,21 +24,47 @@ let membersSidebarVisible = true;
 // ===== INIT =====
 let isLoggedIn = false;
 
-function safeEmit(event, data, callback) {
+function safeEmit(event, dataOrCallback, maybeCallback) {
+  // safeEmit('event', data, callback) veya safeEmit('event', callback) destekle
+  let data, callback;
+  if (typeof dataOrCallback === 'function') {
+    data = undefined;
+    callback = dataOrCallback;
+  } else {
+    data = dataOrCallback;
+    callback = maybeCallback;
+  }
+
+  const doEmit = () => {
+    if (data !== undefined && callback) {
+      socket.emit(event, data, callback);
+    } else if (data !== undefined) {
+      socket.emit(event, data);
+    } else if (callback) {
+      socket.emit(event, callback);
+    } else {
+      socket.emit(event);
+    }
+  };
+
   if (!isLoggedIn) {
     console.warn('⚠️ Henüz giriş yapılmadı, bekleniyor...', event);
-    // Login tamamlanana kadar bekle
+    let attempts = 0;
     const waitForLogin = setInterval(() => {
+      attempts++;
       if (isLoggedIn) {
         clearInterval(waitForLogin);
-        socket.emit(event, data, callback);
+        doEmit();
+      }
+      if (attempts > 50) {
+        clearInterval(waitForLogin);
+        console.error('❌ Login zaman aşımı:', event);
+        if (callback) callback({ success: false, error: 'Oturum zaman aşımı' });
       }
     }, 200);
-    // 10 saniye sonra vazgeç
-    setTimeout(() => clearInterval(waitForLogin), 10000);
     return;
   }
-  socket.emit(event, data, callback);
+  doEmit();
 }
 
 function initApp() {
@@ -625,7 +651,7 @@ function showDMList() {
   document.getElementById('navFriends').classList.remove('active');
   document.getElementById('navDMs').classList.add('active');
 
-  safeEmit('get-dm-contacts', {}, (response) => {
+  safeEmit('get-dm-contacts', (response) => {
     if (response.success) {
       dmContacts = response.contacts;
       renderDMContacts();
@@ -676,8 +702,12 @@ function createServer() {
 }
 
 function joinServer() {
-  const code = document.getElementById('inviteCodeInput').value.trim();
+  const rawCode = document.getElementById('inviteCodeInput').value;
+  const code = rawCode.trim().replace(/\s+/g, '');
+
   if (!code) return showToast('Davet kodu gerekli', 'error');
+
+  console.log('🔗 Katılma denemesi, kod:', code);
 
   safeEmit('join-server', { inviteCode: code }, (response) => {
     if (response.success) {
@@ -686,27 +716,53 @@ function joinServer() {
       selectServer(response.server);
       closeModal('serverModal');
       document.getElementById('inviteCodeInput').value = '';
-      showToast('Sunucuya katıldın!', 'success');
+      showToast(`"${response.server.name}" sunucusuna katıldın!`, 'success');
     } else {
-      showToast(response.error, 'error');
+      console.error('❌ Katılma hatası:', response.error);
+      showToast(response.error || 'Sunucuya katılınamadı', 'error');
     }
   });
 }
 
 function showInviteModal() {
   if (!activeServer) return;
-  document.getElementById('inviteCodeDisplay').value = activeServer.invite_code;
+
+  // Sunucu bilgilerini yeniden çek (güncel invite_code için)
+  const serverData = servers.find(s => s.id === activeServer.id);
+  const code = serverData ? serverData.invite_code : activeServer.invite_code;
+
+  console.log('📋 Davet kodu:', code);
+  document.getElementById('inviteCodeDisplay').value = code || 'Kod bulunamadı';
   document.getElementById('inviteModal').classList.remove('hidden');
   closeServerMenu();
 }
 
 function copyInviteCode() {
   const input = document.getElementById('inviteCodeDisplay');
+  const code = input.value;
+
+  if (!code || code === 'Kod bulunamadı') {
+    showToast('Davet kodu bulunamadı', 'error');
+    return;
+  }
+
   input.select();
-  navigator.clipboard.writeText(input.value);
-  const btn = document.getElementById('copyBtn');
-  btn.innerHTML = '<i class="fas fa-check"></i> Kopyalandı!';
-  setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy"></i> Kopyala'; }, 2000);
+  input.setSelectionRange(0, 99999);
+
+  navigator.clipboard.writeText(code).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.innerHTML = '<i class="fas fa-check"></i> Kopyalandı!';
+    showToast('Davet kodu kopyalandı: ' + code, 'success');
+    setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy"></i> Kopyala'; }, 3000);
+  }).catch(() => {
+    // Fallback
+    try {
+      document.execCommand('copy');
+      showToast('Davet kodu kopyalandı!', 'success');
+    } catch (e) {
+      showToast('Kopyalama başarısız, kodu manuel kopyalayın: ' + code, 'error');
+    }
+  });
 }
 
 function handleLeaveServer() {
@@ -1254,39 +1310,70 @@ let searchTimeout;
 function searchUsers() {
   clearTimeout(searchTimeout);
   const query = document.getElementById('searchUserInput').value.trim();
-  if (query.length < 2) {
+
+  if (query.length < 1) {
     document.getElementById('searchResults').innerHTML = '';
     return;
   }
 
   searchTimeout = setTimeout(() => {
     safeEmit('search-users', { query }, (response) => {
-      if (response.success) {
-        const container = document.getElementById('searchResults');
-        container.innerHTML = '';
+      const container = document.getElementById('searchResults');
+      container.innerHTML = '';
 
-        response.users.forEach(user => {
-          const div = document.createElement('div');
-          div.className = 'search-result-item';
-          div.innerHTML = `
-            <div class="result-avatar" style="background: ${getAvatarColor(user.username)}">
-              ${user.username.charAt(0).toUpperCase()}
-            </div>
-            <div class="result-info">
-              <span class="result-name">${escapeHtml(user.username)}</span>
-              <span class="result-status">${getStatusText(user.status)}</span>
-            </div>
-            <button onclick="event.stopPropagation(); openDM({id:'${user.id}',username:'${escapeHtml(user.username)}',status:'${user.status}'}); closeModal('searchModal')">Mesaj</button>
-          `;
-          container.appendChild(div);
-        });
-
-        if (response.users.length === 0) {
-          container.innerHTML = '<div class="empty-state"><p>Kullanıcı bulunamadı</p></div>';
-        }
+      if (!response || !response.success) {
+        container.innerHTML = '<div class="empty-state"><p>Arama yapılamadı</p></div>';
+        return;
       }
+
+      if (response.users.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>Kullanıcı bulunamadı</p></div>';
+        return;
+      }
+
+      response.users.forEach(user => {
+        const div = document.createElement('div');
+        div.className = 'search-result-item';
+        const safeUsername = escapeHtml(user.username);
+        const safeId = escapeHtml(user.id);
+        const safeStatus = escapeHtml(user.status || 'offline');
+
+        div.innerHTML = `
+          <div class="result-avatar" style="background: ${getAvatarColor(user.username)}">
+            ${user.username.charAt(0).toUpperCase()}
+          </div>
+          <div class="result-info">
+            <span class="result-name">${safeUsername}</span>
+            <span class="result-status">${getStatusText(user.status)}</span>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button onclick="event.stopPropagation(); sendFriendRequestById('${safeId}','${safeUsername}')">
+              <i class="fas fa-user-plus"></i> Ekle
+            </button>
+            <button onclick="event.stopPropagation(); startDMFromSearch('${safeId}','${safeUsername}','${safeStatus}')">
+              <i class="fas fa-comment"></i> Mesaj
+            </button>
+          </div>
+        `;
+        container.appendChild(div);
+      });
     });
   }, 300);
+}
+
+function sendFriendRequestById(userId, username) {
+  safeEmit('send-friend-request', { username }, (response) => {
+    if (response.success) {
+      showToast(`${username} kullanıcısına arkadaşlık isteği gönderildi!`, 'success');
+    } else {
+      showToast(response.error || 'İstek gönderilemedi', 'error');
+    }
+  });
+}
+
+function startDMFromSearch(userId, username, status) {
+  closeModal('searchModal');
+  openDM({ id: userId, username: username, status: status || 'offline' });
 }
 
 function handleLogout() {
