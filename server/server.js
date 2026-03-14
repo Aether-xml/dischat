@@ -75,6 +75,12 @@ const userSockets = new Map(); // userId -> Set<socketId>
 io.on('connection', (socket) => {
   console.log(`🟢 Bağlantı: ${socket.id}`);
 
+  // Debug: Her event'i logla
+  socket.onAny((event, ...args) => {
+    const user = onlineUsers.get(socket.id);
+    console.log(`📨 [${event}] socket:${socket.id} user:${user ? user.username : 'NONE'}`);
+  });
+
   // ===== AUTH =====
   socket.on('register', (data, callback) => {
     try {
@@ -95,6 +101,9 @@ io.on('connection', (socket) => {
       if (!userSockets.has(user.id)) userSockets.set(user.id, new Set());
       userSockets.get(user.id).add(socket.id);
 
+      console.log(`✅ Login başarılı: ${user.username} (socket: ${socket.id})`);
+      console.log(`   onlineUsers boyutu: ${onlineUsers.size}`);
+
       // Kullanıcının sunucularını yükle
       const servers = db.getUserServers(user.id);
       const friends = db.getFriends(user.id);
@@ -105,6 +114,7 @@ io.on('connection', (socket) => {
       servers.forEach(s => {
         socket.join(`server:${s.id}`);
         s.channels.forEach(c => socket.join(`channel:${c.id}`));
+        console.log(`   Sunucu odasına katıldı: ${s.name} (${s.channels.length} kanal)`);
       });
 
       // Arkadaşlara online bildirimi
@@ -119,6 +129,7 @@ io.on('connection', (socket) => {
 
       callback({ success: true, user, servers, friends, pendingRequests, dmContacts });
     } catch (err) {
+      console.error(`❌ Login hatası: ${err.message}`);
       callback({ success: false, error: err.message });
     }
   });
@@ -126,16 +137,26 @@ io.on('connection', (socket) => {
   // ===== SERVER MANAGEMENT =====
   socket.on('create-server', (data, callback) => {
     const user = onlineUsers.get(socket.id);
-    if (!user) return callback({ success: false, error: 'Oturum açın' });
+    console.log('📌 create-server isteği, socket:', socket.id, 'user:', user ? user.username : 'YOK');
+
+    if (!user) {
+      console.log('❌ Kullanıcı bulunamadı. onlineUsers:', [...onlineUsers.keys()]);
+      return callback({ success: false, error: 'Oturum açın - lütfen sayfayı yenileyin' });
+    }
 
     try {
-      const server = db.createServer(data.name, user.id, data.icon || '');
+      const name = (data.name || '').trim();
+      if (!name) return callback({ success: false, error: 'Sunucu adı gerekli' });
+
+      const server = db.createServer(name, user.id, data.icon || '');
       socket.join(`server:${server.id}`);
       server.channels.forEach(c => socket.join(`channel:${c.id}`));
 
       const fullServer = db.getServerWithDetails(server.id);
+      console.log('✅ Sunucu oluşturuldu:', fullServer.name, 'Davet kodu:', fullServer.invite_code);
       callback({ success: true, server: fullServer });
     } catch (err) {
+      console.error('❌ Sunucu oluşturma hatası:', err.message);
       callback({ success: false, error: err.message });
     }
   });
@@ -145,7 +166,10 @@ io.on('connection', (socket) => {
     if (!user) return callback({ success: false, error: 'Oturum açın' });
 
     try {
-      const server = db.joinServerByInvite(data.inviteCode, user.id);
+      const inviteCode = (data.inviteCode || '').trim();
+      if (!inviteCode) return callback({ success: false, error: 'Davet kodu boş olamaz' });
+
+      const server = db.joinServerByInvite(inviteCode, user.id);
       socket.join(`server:${server.id}`);
       server.channels.forEach(c => socket.join(`channel:${c.id}`));
 
@@ -398,8 +422,13 @@ io.on('connection', (socket) => {
     if (!user) return callback({ success: false, error: 'Oturum açın' });
 
     try {
-      const friend = db.getUserByUsername(data.username);
-      if (!friend) return callback({ success: false, error: 'Kullanıcı bulunamadı' });
+      const username = (data.username || '').trim();
+      if (!username) return callback({ success: false, error: 'Kullanıcı adı gerekli' });
+
+      const friend = db.getUserByUsername(username);
+      if (!friend) return callback({ success: false, error: `"${username}" adlı kullanıcı bulunamadı` });
+
+      if (friend.id === user.id) return callback({ success: false, error: 'Kendinize istek gönderemezsiniz' });
 
       db.sendFriendRequest(user.id, friend.id);
 
