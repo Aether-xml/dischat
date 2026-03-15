@@ -12,12 +12,12 @@
   <div class="app-container">
     <!-- Server Sidebar -->
     <nav class="server-sidebar" id="serverSidebar">
-      <div class="server-icon home-icon active" id="homeBtn" title="Ana Sayfa" onclick="showHome()">
+      <div class="server-icon home-icon active" id="homeBtn" title="Ana Sayfa">
         <i class="fas fa-comments"></i>
       </div>
       <div class="sidebar-separator"></div>
       <div id="serverList"></div>
-      <div class="server-icon add-server" title="Sunucu Ekle" onclick="showServerModal()">
+      <div class="server-icon add-server" title="Sunucu Ekle" id="addServerBtn">
         <i class="fas fa-plus"></i>
       </div>
     </nav>
@@ -27,18 +27,18 @@
       <!-- Home View -->
       <div class="sidebar-content" id="homeView">
         <div class="sidebar-header">
-          <div class="search-bar" onclick="showSearchModal()">
+          <div class="search-bar" id="searchBarBtn">
             <i class="fas fa-search"></i>
             <span>Sohbet bul veya başlat</span>
           </div>
         </div>
 
         <div class="sidebar-nav">
-          <div class="nav-item active" onclick="showFriends('all')" id="navFriends">
+          <div class="nav-item active" id="navFriends">
             <i class="fas fa-user-friends"></i>
             <span>Arkadaşlar</span>
           </div>
-          <div class="nav-item" onclick="showDMList()" id="navDMs">
+          <div class="nav-item" id="navDMs">
             <i class="fas fa-inbox"></i>
             <span>Direkt Mesajlar</span>
             <span class="badge hidden" id="dmBadge">0</span>
@@ -48,7 +48,7 @@
         <div class="sidebar-section">
           <div class="section-header">
             <span>DİREKT MESAJLAR</span>
-            <button onclick="showSearchModal()" title="DM Oluştur"><i class="fas fa-plus"></i></button>
+            <button id="newDMBtn" title="DM Oluştur"><i class="fas fa-plus"></i></button>
           </div>
           <div id="dmContactList" class="member-list"></div>
         </div>
@@ -58,22 +58,22 @@
       <div class="sidebar-content hidden" id="serverView">
         <div class="sidebar-header server-name-header">
           <h3 id="currentServerName">Sunucu Adı</h3>
-          <button class="server-dropdown-btn" onclick="toggleServerMenu()">
+          <button class="server-dropdown-btn" id="serverDropdownBtn">
             <i class="fas fa-chevron-down"></i>
           </button>
 
           <!-- Server Dropdown Menu -->
           <div class="server-dropdown hidden" id="serverDropdown">
-            <div class="dropdown-item" onclick="showInviteModal()">
+            <div class="dropdown-item" id="inviteBtn">
               <i class="fas fa-user-plus"></i>
               <span>İnsanları Davet Et</span>
             </div>
-            <div class="dropdown-item" onclick="showCreateChannelModal()">
+            <div class="dropdown-item" id="createChannelBtn">
               <i class="fas fa-plus-circle"></i>
               <span>Kanal Oluştur</span>
             </div>
             <div class="dropdown-separator"></div>
-            <div class="dropdown-item danger" onclick="handleLeaveServer()">
+            <div class="dropdown-item danger" id="leaveServerBtn">
               <i class="fas fa-sign-out-alt"></i>
               <span>Sunucudan Ayrıl</span>
             </div>
@@ -83,7 +83,7 @@
         <div class="sidebar-section">
           <div class="section-header">
             <span>METİN KANALLARI</span>
-            <button onclick="showCreateChannelModal()" title="Kanal Oluştur"><i class="fas fa-plus"></i></button>
+            <button id="createChannelBtn2" title="Kanal Oluştur"><i class="fas fa-plus"></i></button>
           </div>
           <div id="channelList" class="channel-list"></div>
         </div>
@@ -102,26 +102,26 @@
           </div>
         </div>
         <div class="user-controls">
-          <button onclick="toggleStatusMenu()" title="Durum Değiştir"><i class="fas fa-circle" id="statusIcon"></i></button>
-          <button onclick="showSettingsModal()" title="Ayarlar"><i class="fas fa-cog"></i></button>
-          <button onclick="handleLogout()" title="Çıkış"><i class="fas fa-sign-out-alt"></i></button>
+          <button id="statusMenuBtn" title="Durum Değiştir"><i class="fas fa-circle" id="statusIcon"></i></button>
+          <button id="settingsBtn" title="Ayarlar"><i class="fas fa-cog"></i></button>
+          <button id="logoutBtn" title="Çıkış"><i class="fas fa-sign-out-alt"></i></button>
         </div>
 
         <!-- Status Menu -->
         <div class="status-menu hidden" id="statusMenu">
-          <div class="status-option" onclick="changeStatus('online')">
+          <div class="status-option" data-status="online">
             <div class="status-circle online"></div>
             <span>Çevrimiçi</span>
           </div>
-          <div class="status-option" onclick="changeStatus('idle')">
+          <div class="status-option" data-status="idle">
             <div class="status-circle idle"></div>
             <span>Boşta</span>
           </div>
-          <div class="status-option" onclick="changeStatus('dnd')">
+          <div class="status-option" data-status="dnd">
             <div class="status-circle dnd"></div>
             <span>Rahatsız Etmeyin</span>
           </div>
-          <div class="status-option" onclick="changeStatus('offline')">
+          <div class="status-option" data-status="offline">
             <div class="status-circle offline-status"></div>
             <span>Görünmez</span>
           </div>
@@ -140,11 +140,11 @@
           <h2>Hoş Geldin, <span id="welcomeName"></span>!</h2>
           <p>Bir sunucu seç veya arkadaşlarınla sohbet etmeye başla</p>
           <div class="welcome-actions">
-            <button class="welcome-btn primary" onclick="showServerModal()">
+            <button class="welcome-btn primary" id="welcomeCreateBtn">
               <i class="fas fa-plus"></i>
               Sunucu Oluştur
             </button>
-            <button class="welcome-btn secondary" onclick="showJoinModal()">
+            <button class="welcome-btn secondary" id="welcomeJoinBtn">
               <i class="fas fa-sign-in-alt"></i>
               Sunucuya Katıl
             </button>
@@ -159,19 +159,18 @@
             <i class="fas fa-user-friends"></i>
             <h3>Arkadaşlar</h3>
             <div class="header-tabs">
-              <button class="tab active" onclick="showFriends('all')" id="tabAll">Tümü</button>
-              <button class="tab" onclick="showFriends('online')" id="tabOnline">Çevrimiçi</button>
-              <button class="tab" onclick="showFriends('pending')" id="tabPending">
+              <button class="tab active" id="tabAll">Tümü</button>
+              <button class="tab" id="tabOnline">Çevrimiçi</button>
+              <button class="tab" id="tabPending">
                 Bekleyen
                 <span class="tab-badge hidden" id="pendingBadge">0</span>
               </button>
-              <button class="tab green" onclick="showFriends('add')" id="tabAdd">Arkadaş Ekle</button>
+              <button class="tab green" id="tabAdd">Arkadaş Ekle</button>
             </div>
           </div>
         </div>
 
         <div class="friends-content" id="friendsContent">
-          <!-- Dynamic content -->
         </div>
       </div>
 
@@ -184,8 +183,8 @@
             <span class="chat-topic" id="chatTopic"></span>
           </div>
           <div class="header-right">
-            <button onclick="toggleMemberSidebar()" title="Üyeler"><i class="fas fa-users"></i></button>
-            <button onclick="showPinnedMessages()" title="Sabitlenmiş"><i class="fas fa-thumbtack"></i></button>
+            <button id="toggleMembersBtn" title="Üyeler"><i class="fas fa-users"></i></button>
+            <button id="pinnedBtn" title="Sabitlenmiş"><i class="fas fa-thumbtack"></i></button>
             <div class="search-box">
               <input type="text" placeholder="Ara" id="messageSearch">
               <i class="fas fa-search"></i>
@@ -216,7 +215,7 @@
 
           <div class="message-input-container">
             <div class="message-input-wrapper">
-              <button class="input-action" onclick="document.getElementById('fileInput').click()" title="Dosya Ekle">
+              <button class="input-action" id="fileUploadBtn" title="Dosya Ekle">
                 <i class="fas fa-plus-circle"></i>
               </button>
               <input type="file" id="fileInput" hidden accept="image/*,video/*,.pdf,.txt,.zip">
@@ -224,16 +223,15 @@
                 <textarea id="messageInput" placeholder="Mesajını yaz..." rows="1" maxlength="2000"></textarea>
               </div>
               <div class="input-actions-right">
-                <button class="input-action" onclick="toggleEmojiPicker()" title="Emoji">
+                <button class="input-action" id="emojiBtn" title="Emoji">
                   <i class="fas fa-smile"></i>
                 </button>
-                <button class="input-action send-btn" onclick="sendCurrentMessage()" title="Gönder">
+                <button class="input-action send-btn" id="sendMsgBtn" title="Gönder">
                   <i class="fas fa-paper-plane"></i>
                 </button>
               </div>
             </div>
 
-            <!-- File Preview -->
             <div class="file-preview hidden" id="filePreview">
               <div class="file-preview-content">
                 <img id="filePreviewImage" src="" alt="">
@@ -241,7 +239,7 @@
                   <span id="filePreviewName"></span>
                   <span id="filePreviewSize"></span>
                 </div>
-                <button onclick="clearFilePreview()"><i class="fas fa-times"></i></button>
+                <button id="clearFileBtn"><i class="fas fa-times"></i></button>
               </div>
             </div>
           </div>
@@ -279,7 +277,7 @@
 
           <div class="message-input-container">
             <div class="message-input-wrapper">
-              <button class="input-action" onclick="document.getElementById('dmFileInput').click()">
+              <button class="input-action" id="dmFileUploadBtn">
                 <i class="fas fa-plus-circle"></i>
               </button>
               <input type="file" id="dmFileInput" hidden>
@@ -287,10 +285,10 @@
                 <textarea id="dmMessageInput" placeholder="Mesajını yaz..." rows="1" maxlength="2000"></textarea>
               </div>
               <div class="input-actions-right">
-                <button class="input-action" onclick="toggleEmojiPicker()" title="Emoji">
+                <button class="input-action" id="dmEmojiBtn" title="Emoji">
                   <i class="fas fa-smile"></i>
                 </button>
-                <button class="input-action send-btn" onclick="sendCurrentDM()" title="Gönder">
+                <button class="input-action send-btn" id="sendDMBtn" title="Gönder">
                   <i class="fas fa-paper-plane"></i>
                 </button>
               </div>
@@ -316,12 +314,12 @@
     <div class="modal">
       <div class="modal-header">
         <h3 id="serverModalTitle">Sunucu Oluştur</h3>
-        <button class="modal-close" onclick="closeModal('serverModal')"><i class="fas fa-times"></i></button>
+        <button class="modal-close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <div class="modal-tabs" id="serverModalTabs">
-          <button class="modal-tab active" onclick="switchServerModalTab('create')">Oluştur</button>
-          <button class="modal-tab" onclick="switchServerModalTab('join')">Katıl</button>
+          <button class="modal-tab active">Oluştur</button>
+          <button class="modal-tab">Katıl</button>
         </div>
 
         <!-- Create Server -->
@@ -330,7 +328,7 @@
             <label>SUNUCU ADI</label>
             <input type="text" id="newServerName" placeholder="Harika Sunucum" maxlength="50">
           </div>
-          <button class="modal-btn primary" onclick="createServer()">
+          <button class="modal-btn primary" id="createServerBtn">
             <i class="fas fa-plus"></i> Oluştur
           </button>
         </div>
@@ -341,7 +339,7 @@
             <label>DAVET KODU</label>
             <input type="text" id="inviteCodeInput" placeholder="Davet kodunu yapıştır">
           </div>
-          <button class="modal-btn primary" onclick="joinServer()">
+          <button class="modal-btn primary" id="joinServerBtn">
             <i class="fas fa-sign-in-alt"></i> Katıl
           </button>
         </div>
@@ -354,13 +352,13 @@
     <div class="modal">
       <div class="modal-header">
         <h3>Arkadaşlarını Davet Et</h3>
-        <button class="modal-close" onclick="closeModal('inviteModal')"><i class="fas fa-times"></i></button>
+        <button class="modal-close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <p class="modal-description">Bu davet kodunu arkadaşlarınla paylaş:</p>
         <div class="invite-code-container">
           <input type="text" id="inviteCodeDisplay" readonly>
-          <button onclick="copyInviteCode()" id="copyBtn">
+          <button id="copyBtn">
             <i class="fas fa-copy"></i> Kopyala
           </button>
         </div>
@@ -373,14 +371,14 @@
     <div class="modal">
       <div class="modal-header">
         <h3>Kanal Oluştur</h3>
-        <button class="modal-close" onclick="closeModal('channelModal')"><i class="fas fa-times"></i></button>
+        <button class="modal-close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <div class="form-group">
           <label>KANAL ADI</label>
           <input type="text" id="newChannelName" placeholder="yeni-kanal" maxlength="30">
         </div>
-        <button class="modal-btn primary" onclick="createChannel()">
+        <button class="modal-btn primary" id="createChannelConfirmBtn">
           <i class="fas fa-plus"></i> Oluştur
         </button>
       </div>
@@ -392,11 +390,11 @@
     <div class="modal">
       <div class="modal-header">
         <h3>Kullanıcı Ara</h3>
-        <button class="modal-close" onclick="closeModal('searchModal')"><i class="fas fa-times"></i></button>
+        <button class="modal-close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <input type="text" id="searchUserInput" placeholder="Kullanıcı adı ile ara..." oninput="searchUsers()">
+          <input type="text" id="searchUserInput" placeholder="Kullanıcı adı ile ara...">
         </div>
         <div id="searchResults" class="search-results"></div>
       </div>
@@ -408,7 +406,7 @@
     <div class="modal modal-large">
       <div class="modal-header">
         <h3><i class="fas fa-cog"></i> Ayarlar</h3>
-        <button class="modal-close" onclick="closeModal('settingsModal')"><i class="fas fa-times"></i></button>
+        <button class="modal-close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body">
         <div class="settings-section">
@@ -421,7 +419,7 @@
             <label>ÖZEL DURUM</label>
             <input type="text" id="settingsCustomStatus" placeholder="Ne yapıyorsun?" maxlength="50">
           </div>
-          <button class="modal-btn primary" onclick="saveSettings()">
+          <button class="modal-btn primary" id="saveSettingsBtn">
             <i class="fas fa-save"></i> Kaydet
           </button>
         </div>
@@ -432,20 +430,20 @@
   <!-- Emoji Picker -->
   <div class="emoji-picker hidden" id="emojiPicker">
     <div class="emoji-header">
-      <input type="text" placeholder="Emoji ara..." id="emojiSearch" oninput="filterEmojis()">
+      <input type="text" placeholder="Emoji ara..." id="emojiSearch">
     </div>
     <div class="emoji-grid" id="emojiGrid"></div>
   </div>
 
   <!-- Context Menu -->
   <div class="context-menu hidden" id="contextMenu">
-    <div class="context-item" id="ctxEdit" onclick="editSelectedMessage()">
+    <div class="context-item" id="ctxEdit">
       <i class="fas fa-edit"></i> Düzenle
     </div>
-    <div class="context-item danger" id="ctxDelete" onclick="deleteSelectedMessage()">
+    <div class="context-item danger" id="ctxDelete">
       <i class="fas fa-trash"></i> Sil
     </div>
-    <div class="context-item" id="ctxCopy" onclick="copyMessageContent()">
+    <div class="context-item" id="ctxCopy">
       <i class="fas fa-copy"></i> Kopyala
     </div>
   </div>
