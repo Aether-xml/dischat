@@ -5,6 +5,7 @@ const socket = io(window.location.origin, {
   reconnectionAttempts: 10,
   reconnectionDelay: 1000
 });
+
 let currentUser = null;
 let servers = [];
 let friends = [];
@@ -14,16 +15,16 @@ let dmContacts = [];
 let activeServer = null;
 let activeChannel = null;
 let activeDMUser = null;
-let activeView = 'welcome'; // welcome, friends, chat, dm
+let activeView = 'welcome';
 
 let typingTimeout = null;
 let selectedMessageId = null;
 let selectedMessageChannelId = null;
 let membersSidebarVisible = true;
-
-// ===== INIT =====
 let isLoggedIn = false;
+let loginDone = false;
 
+// ===== SAFE EMIT =====
 function safeEmit(event, dataOrCallback, maybeCallback) {
   let data, callback;
   if (typeof dataOrCallback === 'function') {
@@ -35,7 +36,6 @@ function safeEmit(event, dataOrCallback, maybeCallback) {
   }
 
   const doEmit = () => {
-    console.log(`📤 Gönderiliyor: ${event}`, data ? JSON.stringify(data).substring(0, 100) : '');
     if (data !== undefined && callback) {
       socket.emit(event, data, callback);
     } else if (data !== undefined) {
@@ -48,26 +48,16 @@ function safeEmit(event, dataOrCallback, maybeCallback) {
   };
 
   if (!isLoggedIn) {
-    console.warn(`⏳ Login bekleniyor [${event}]... isLoggedIn=${isLoggedIn}, socket.connected=${socket.connected}`);
-
-    // Login olmamışsa önce login'i tetikle
-    if (!socket.connected) {
-      console.warn('⚠️ Socket bağlı değil!');
-      if (callback) callback({ success: false, error: 'Bağlantı yok' });
-      return;
-    }
-
     let waited = 0;
     const waitInterval = setInterval(() => {
       waited += 100;
       if (isLoggedIn) {
         clearInterval(waitInterval);
         doEmit();
-      } else if (waited >= 5000) {
+      } else if (waited >= 8000) {
         clearInterval(waitInterval);
-        console.error(`❌ Zaman aşımı [${event}] - Login tamamlanamadı`);
-        showToast('Oturum hatası, sayfa yenileniyor...', 'error');
-        setTimeout(() => location.reload(), 1500);
+        console.error(`❌ safeEmit zaman aşımı: ${event}`);
+        if (callback) callback({ success: false, error: 'Oturum açılamadı, sayfayı yenileyin' });
       }
     }, 100);
     return;
@@ -76,6 +66,55 @@ function safeEmit(event, dataOrCallback, maybeCallback) {
   doEmit();
 }
 
+// ===== LOGIN =====
+function doLogin() {
+  if (loginDone) return;
+  loginDone = true;
+
+  const savedPassword = sessionStorage.getItem('_p');
+  if (!savedPassword || !currentUser || !currentUser.email) {
+    console.error('❌ Kimlik bilgisi yok');
+    sessionStorage.clear();
+    window.location.href = '/';
+    return;
+  }
+
+  console.log('🔑 Login yapılıyor:', currentUser.email);
+
+  socket.emit('login', { email: currentUser.email, password: savedPassword }, (response) => {
+    if (!response) {
+      console.error('❌ Sunucudan cevap gelmedi');
+      loginDone = false;
+      return;
+    }
+
+    if (response.success) {
+      isLoggedIn = true;
+      currentUser = response.user;
+      servers = response.servers || [];
+      friends = response.friends || [];
+      pendingRequests = response.pendingRequests || [];
+      dmContacts = response.dmContacts || [];
+
+      renderUserPanel();
+      renderServerList();
+      renderDMContacts();
+      updatePendingBadge();
+      document.getElementById('welcomeName').textContent = currentUser.username;
+
+      console.log('✅ Login başarılı:', currentUser.username);
+    } else {
+      console.error('❌ Login hatası:', response.error);
+      loginDone = false;
+      if (response.error && (response.error.includes('Şifre') || response.error.includes('bulunamadı'))) {
+        sessionStorage.clear();
+        window.location.href = '/';
+      }
+    }
+  });
+}
+
+// ===== INIT =====
 function initApp() {
   const userData = sessionStorage.getItem('user');
   const savedPassword = sessionStorage.getItem('_p');
@@ -95,7 +134,6 @@ function initApp() {
   renderUserPanel();
   document.getElementById('welcomeName').textContent = currentUser.username;
 
-  // connect eventi hem ilk bağlantıda hem reconnect'te tetiklenir
   socket.on('connect', () => {
     console.log('🟢 Socket bağlandı:', socket.id);
     loginDone = false;
@@ -103,7 +141,6 @@ function initApp() {
     doLogin();
   });
 
-  // Eğer socket zaten bağlıysa connect gelmez, manuel tetikle
   if (socket.connected) {
     loginDone = false;
     isLoggedIn = false;
@@ -111,61 +148,29 @@ function initApp() {
   }
 }
 
-  currentUser = JSON.parse(userData);
-
-  // Setup event listeners (sadece bir kez)
-  setupInputListeners();
-  setupSocketListeners();
-  setupGlobalListeners();
-  initEmojiPicker();
-
-  // Socket bağlantısı hazır olunca login yap
-  if (socket.connected) {
-    doLogin();
-  } else {
-    socket.on('connect', () => {
-      doLogin();
-    });
-  }
-}
-
-function doLogin() {
-  const savedPassword = sessionStorage.getItem('_p');
-  if (!savedPassword || !currentUser) {
-    window.location.href = '/';
-    return;
-  }
-
-  socket.emit('login', { email: currentUser.email, password: savedPassword }, (response) => {
-    if (response.success) {
-      isLoggedIn = true;
-      currentUser = response.user;
-      servers = response.servers || [];
-      friends = response.friends || [];
-      pendingRequests = response.pendingRequests || [];
-      dmContacts = response.dmContacts || [];
-
-      // Render UI
-      renderUserPanel();
-      renderServerList();
-      renderDMContacts();
-      updatePendingBadge();
-      document.getElementById('welcomeName').textContent = currentUser.username;
-
-      console.log('✅ Oturum açıldı:', currentUser.username);
-    } else {
-      console.error('❌ Login hatası:', response.error);
-      sessionStorage.clear();
-      window.location.href = '/';
-    }
-  });
-}
-
-// Sayfa yüklenince başlat
 initApp();
+
+// ===== DISCONNECT & RECONNECT =====
+socket.on('disconnect', (reason) => {
+  console.log('🔴 Bağlantı koptu:', reason);
+  isLoggedIn = false;
+  loginDone = false;
+  if (reason !== 'io client disconnect') {
+    showToast('Bağlantı koptu, yeniden bağlanılıyor...', 'error');
+  }
+});
+
+socket.io.on('reconnect_attempt', (attempt) => {
+  console.log(`🔄 Reconnect denemesi: ${attempt}`);
+});
+
+socket.io.on('reconnect_failed', () => {
+  showToast('Bağlantı kurulamadı. Sayfayı yenileyin.', 'error');
+});
 
 // ===== RENDER FUNCTIONS =====
 function renderUserPanel() {
+  if (!currentUser) return;
   const avatar = document.getElementById('userAvatar');
   avatar.textContent = currentUser.username.charAt(0).toUpperCase();
   avatar.style.background = getAvatarColor(currentUser.username);
@@ -174,7 +179,7 @@ function renderUserPanel() {
   document.getElementById('userStatusText').textContent = getStatusText(currentUser.status || 'online');
 
   const dot = document.getElementById('userStatusDot');
-  dot.className = 'status-dot ' + (currentUser.status === 'online' ? '' : currentUser.status);
+  dot.className = 'status-dot ' + (currentUser.status === 'online' ? '' : (currentUser.status || ''));
 }
 
 function renderServerList() {
@@ -189,7 +194,7 @@ function renderServerList() {
 
     const initial = document.createElement('span');
     initial.className = 'server-initial';
-    initial.textContent = server.name.split(' ').map(w => w[0]).join('').substring(0, 2);
+    initial.textContent = server.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
     div.appendChild(initial);
 
     container.appendChild(div);
@@ -221,12 +226,18 @@ function renderMembers(members) {
   const offline = members.filter(m => m.status === 'offline');
 
   if (online.length > 0) {
-    container.innerHTML += `<div class="member-role-header">ÇEVRİMİÇİ — ${online.length}</div>`;
+    const header = document.createElement('div');
+    header.className = 'member-role-header';
+    header.textContent = `ÇEVRİMİÇİ — ${online.length}`;
+    container.appendChild(header);
     online.forEach(m => container.appendChild(createMemberElement(m)));
   }
 
   if (offline.length > 0) {
-    container.innerHTML += `<div class="member-role-header">ÇEVRİMDIŞI — ${offline.length}</div>`;
+    const header = document.createElement('div');
+    header.className = 'member-role-header';
+    header.textContent = `ÇEVRİMDIŞI — ${offline.length}`;
+    container.appendChild(header);
     offline.forEach(m => container.appendChild(createMemberElement(m)));
   }
 }
@@ -270,7 +281,7 @@ function renderDMContacts() {
 
     div.innerHTML = `
       <div class="dm-contact-avatar">
-        <div class="avatar-display" style="background: ${getAvatarColor(contact.username)}; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:#fff;">
+        <div style="background: ${getAvatarColor(contact.username)}; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:#fff;">
           ${contact.username.charAt(0).toUpperCase()}
         </div>
       </div>
@@ -289,85 +300,80 @@ function renderMessages(messages, container, isDM = false) {
 
   messages.forEach(msg => {
     const msgTime = new Date(msg.created_at);
-    const sameAuthor = msg.user_id === lastAuthor;
+    const sameAuthor = (msg.user_id || msg.sender_id) === lastAuthor;
     const withinTime = lastTime && (msgTime - lastTime) < 5 * 60 * 1000;
     const isGrouped = sameAuthor && withinTime;
 
-    const div = document.createElement('div');
-    div.className = `message ${isGrouped ? '' : 'message-start'}`;
-    div.dataset.messageId = msg.id;
-    div.dataset.userId = msg.user_id;
-
-    const isOwn = msg.user_id === currentUser.id || msg.sender_id === currentUser.id;
-
-    let contentHtml = formatMessage(msg.content);
-    if (msg.edited) contentHtml += ' <span class="edited-tag">(düzenlendi)</span>';
-    if (msg.file_url) {
-      if (/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.file_url)) {
-        contentHtml += `<br><img src="${msg.file_url}" class="message-image" onclick="window.open('${msg.file_url}')">`;
-      } else {
-        contentHtml += `<br><a href="${msg.file_url}" target="_blank"><i class="fas fa-file"></i> ${msg.file_url.split('/').pop()}</a>`;
-      }
-    }
-
-    // Reactions
-    let reactionsHtml = '';
-    if (msg.reactions && msg.reactions.length > 0) {
-      const grouped = {};
-      msg.reactions.forEach(r => {
-        if (!grouped[r.emoji]) grouped[r.emoji] = [];
-        grouped[r.emoji].push(r);
-      });
-
-      reactionsHtml = '<div class="message-reactions">';
-      Object.entries(grouped).forEach(([emoji, reactions]) => {
-        const isActive = reactions.some(r => r.user_id === currentUser.id);
-        reactionsHtml += `
-          <div class="reaction ${isActive ? 'active' : ''}"
-               onclick="toggleReaction('${msg.id}', '${emoji}', '${isDM ? '' : activeChannel?.id}')">
-            <span>${emoji}</span>
-            <span class="reaction-count">${reactions.length}</span>
-          </div>
-        `;
-      });
-      reactionsHtml += '</div>';
-    }
-
-    div.innerHTML = `
-      <div class="message-avatar" style="background: ${getAvatarColor(msg.username || '')}">
-        ${(msg.username || '?').charAt(0).toUpperCase()}
-      </div>
-      <div class="message-body">
-        <div class="message-header">
-          <span class="message-author">${escapeHtml(msg.username || 'Bilinmeyen')}</span>
-          <span class="message-timestamp">${formatTimestamp(msg.created_at)}</span>
-        </div>
-        <div class="message-content">${contentHtml}</div>
-        ${reactionsHtml}
-      </div>
-      ${isOwn ? `
-        <div class="message-actions">
-          <button class="message-action-btn" onclick="startEditMessage('${msg.id}')" title="Düzenle"><i class="fas fa-edit"></i></button>
-          <button class="message-action-btn" onclick="startDeleteMessage('${msg.id}', '${isDM ? '' : activeChannel?.id}')" title="Sil"><i class="fas fa-trash"></i></button>
-          <button class="message-action-btn" onclick="showReactionPicker('${msg.id}')" title="Tepki"><i class="fas fa-smile"></i></button>
-        </div>
-      ` : `
-        <div class="message-actions">
-          <button class="message-action-btn" onclick="showReactionPicker('${msg.id}')" title="Tepki"><i class="fas fa-smile"></i></button>
-        </div>
-      `}
-    `;
-
-    div.addEventListener('contextmenu', (e) => showContextMenu(e, msg, isOwn));
-
+    const div = createMessageElement(msg, isGrouped, isDM);
     list.appendChild(div);
+
     lastAuthor = msg.user_id || msg.sender_id;
     lastTime = msgTime;
   });
 
-  // Scroll to bottom
   const messagesContainer = document.getElementById(isDM ? 'dmMessagesContainer' : 'messagesContainer');
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function createMessageElement(msg, isGrouped, isDM = false) {
+  const div = document.createElement('div');
+  div.className = `message ${isGrouped ? '' : 'message-start'}`;
+  div.dataset.messageId = msg.id;
+  div.dataset.userId = msg.user_id || msg.sender_id;
+  div.dataset.time = msg.created_at;
+
+  const isOwn = (msg.user_id || msg.sender_id) === currentUser.id;
+
+  let contentHtml = formatMessage(msg.content);
+  if (msg.edited) contentHtml += ' <span class="edited-tag">(düzenlendi)</span>';
+  if (msg.file_url) {
+    if (/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.file_url)) {
+      contentHtml += `<br><img src="${msg.file_url}" class="message-image" onclick="window.open('${msg.file_url}')">`;
+    } else {
+      contentHtml += `<br><a href="${msg.file_url}" target="_blank"><i class="fas fa-file"></i> ${msg.file_url.split('/').pop()}</a>`;
+    }
+  }
+
+  let reactionsHtml = '';
+  if (msg.reactions && msg.reactions.length > 0) {
+    const grouped = {};
+    msg.reactions.forEach(r => {
+      if (!grouped[r.emoji]) grouped[r.emoji] = [];
+      grouped[r.emoji].push(r);
+    });
+
+    reactionsHtml = '<div class="message-reactions">';
+    Object.entries(grouped).forEach(([emoji, reactions]) => {
+      const isActive = reactions.some(r => r.user_id === currentUser.id);
+      const chId = isDM ? '' : (activeChannel?.id || '');
+      reactionsHtml += `<div class="reaction ${isActive ? 'active' : ''}" onclick="toggleReaction('${msg.id}','${emoji}','${chId}')"><span>${emoji}</span><span class="reaction-count">${reactions.length}</span></div>`;
+    });
+    reactionsHtml += '</div>';
+  }
+
+  div.innerHTML = `
+    <div class="message-avatar" style="background: ${getAvatarColor(msg.username || '')}">
+      ${(msg.username || '?').charAt(0).toUpperCase()}
+    </div>
+    <div class="message-body">
+      <div class="message-header">
+        <span class="message-author">${escapeHtml(msg.username || 'Bilinmeyen')}</span>
+        <span class="message-timestamp">${formatTimestamp(msg.created_at)}</span>
+      </div>
+      <div class="message-content">${contentHtml}</div>
+      ${reactionsHtml}
+    </div>
+    <div class="message-actions">
+      ${isOwn ? `
+        <button class="message-action-btn" onclick="startEditMessage('${msg.id}')" title="Düzenle"><i class="fas fa-edit"></i></button>
+        <button class="message-action-btn" onclick="startDeleteMessage('${msg.id}','${isDM ? '' : (activeChannel?.id || '')}')" title="Sil"><i class="fas fa-trash"></i></button>
+      ` : ''}
+      <button class="message-action-btn" onclick="showReactionPicker('${msg.id}')" title="Tepki"><i class="fas fa-smile"></i></button>
+    </div>
+  `;
+
+  div.addEventListener('contextmenu', (e) => showContextMenu(e, msg, isOwn));
+  return div;
 }
 
 // ===== NAVIGATION =====
@@ -378,7 +384,6 @@ function showHome() {
 
   document.getElementById('homeBtn').classList.add('active');
   document.querySelectorAll('#serverList .server-icon').forEach(el => el.classList.remove('active'));
-
   document.getElementById('homeView').classList.remove('hidden');
   document.getElementById('serverView').classList.add('hidden');
 
@@ -400,7 +405,6 @@ function selectServer(server) {
   renderChannelList(server);
   renderMembers(server.members || []);
 
-  // Select first channel
   if (server.channels.length > 0) {
     selectChannel(server.channels[0]);
   } else {
@@ -419,7 +423,6 @@ function selectChannel(channel) {
   renderChannelList(activeServer);
   showView('chat');
 
-  // Load messages
   safeEmit('get-messages', { channelId: channel.id, limit: 50 }, (response) => {
     if (response.success) {
       renderMessages(response.messages, 'messagesList');
@@ -468,28 +471,19 @@ function showFriends(tab) {
 
   showView('friends');
 
-  // Update tabs
   document.querySelectorAll('.header-tabs .tab').forEach(t => t.classList.remove('active'));
-  document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('active');
+  const tabEl = document.getElementById(`tab${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+  if (tabEl) tabEl.classList.add('active');
 
   const content = document.getElementById('friendsContent');
 
   switch (tab) {
-    case 'all':
-      renderFriendList(friends, content);
-      break;
-    case 'online':
-      renderFriendList(friends.filter(f => f.status !== 'offline'), content);
-      break;
-    case 'pending':
-      renderPendingRequests(content);
-      break;
-    case 'add':
-      renderAddFriend(content);
-      break;
+    case 'all': renderFriendList(friends, content); break;
+    case 'online': renderFriendList(friends.filter(f => f.status !== 'offline'), content); break;
+    case 'pending': renderPendingRequests(content); break;
+    case 'add': renderAddFriend(content); break;
   }
 
-  // Nav active state
   document.getElementById('navFriends').classList.add('active');
   document.getElementById('navDMs').classList.remove('active');
 }
@@ -501,8 +495,7 @@ function renderFriendList(friendList, container) {
         <i class="fas fa-user-friends"></i>
         <h4>Arkadaş bulunamadı</h4>
         <p>Arkadaş eklemek için "Arkadaş Ekle" sekmesine git</p>
-      </div>
-    `;
+      </div>`;
     return;
   }
 
@@ -511,7 +504,6 @@ function renderFriendList(friendList, container) {
   friendList.forEach(friend => {
     const div = document.createElement('div');
     div.className = 'friend-item';
-
     div.innerHTML = `
       <div class="friend-avatar">
         <div class="avatar-display" style="background: ${getAvatarColor(friend.username)}">
@@ -524,14 +516,13 @@ function renderFriendList(friendList, container) {
         <span class="friend-status">${getStatusText(friend.status)}</span>
       </div>
       <div class="friend-actions">
-        <button class="message" onclick="openDM({id:'${friend.id}',username:'${escapeHtml(friend.username)}',status:'${friend.status}'})" title="Mesaj">
+        <button class="message" title="Mesaj" onclick="openDM({id:'${friend.id}',username:'${escapeHtml(friend.username)}',status:'${friend.status || 'offline'}'})">
           <i class="fas fa-comment"></i>
         </button>
-        <button class="reject" onclick="removeFriend('${friend.id}')" title="Arkadaşlıktan Çıkar">
+        <button class="reject" title="Arkadaşlıktan Çıkar" onclick="removeFriend('${friend.id}')">
           <i class="fas fa-user-minus"></i>
         </button>
-      </div>
-    `;
+      </div>`;
     container.appendChild(div);
   });
 }
@@ -543,8 +534,7 @@ function renderPendingRequests(container) {
         <i class="fas fa-clock"></i>
         <h4>Bekleyen istek yok</h4>
         <p>Tüm arkadaşlık istekleri burada görünür</p>
-      </div>
-    `;
+      </div>`;
     return;
   }
 
@@ -564,14 +554,9 @@ function renderPendingRequests(container) {
         <span class="friend-status">Gelen arkadaşlık isteği</span>
       </div>
       <div class="friend-actions">
-        <button class="accept" onclick="acceptFriend('${req.id}')" title="Kabul Et">
-          <i class="fas fa-check"></i>
-        </button>
-        <button class="reject" onclick="rejectFriend('${req.id}')" title="Reddet">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-    `;
+        <button class="accept" title="Kabul Et" onclick="acceptFriend('${req.id}')"><i class="fas fa-check"></i></button>
+        <button class="reject" title="Reddet" onclick="rejectFriend('${req.id}')"><i class="fas fa-times"></i></button>
+      </div>`;
     container.appendChild(div);
   });
 }
@@ -582,24 +567,24 @@ function renderAddFriend(container) {
       <h4>Arkadaş Ekle</h4>
       <p>Arkadaşlarını kullanıcı adlarıyla ekleyebilirsin.</p>
       <div class="add-friend-input-wrapper">
-        <input type="text" id="addFriendInput" placeholder="Kullanıcı adını gir...">
+        <input type="text" id="addFriendInput" placeholder="Kullanıcı adını gir..." onkeydown="if(event.key==='Enter') sendFriendRequest()">
         <button onclick="sendFriendRequest()">İstek Gönder</button>
       </div>
-    </div>
-  `;
+    </div>`;
 }
 
 function sendFriendRequest() {
   const input = document.getElementById('addFriendInput');
+  if (!input) return;
   const username = input.value.trim();
-  if (!username) return;
+  if (!username) return showToast('Kullanıcı adı girin', 'error');
 
   safeEmit('send-friend-request', { username }, (response) => {
     if (response.success) {
       showToast('Arkadaşlık isteği gönderildi!', 'success');
       input.value = '';
     } else {
-      showToast(response.error, 'error');
+      showToast(response.error || 'İstek gönderilemedi', 'error');
     }
   });
 }
@@ -628,7 +613,6 @@ function rejectFriend(friendId) {
 
 function removeFriend(friendId) {
   if (!confirm('Bu arkadaşı silmek istediğine emin misin?')) return;
-
   safeEmit('remove-friend', { friendId }, (response) => {
     if (response.success) {
       friends = friends.filter(f => f.id !== friendId);
@@ -640,8 +624,7 @@ function removeFriend(friendId) {
 
 function updatePendingBadge() {
   const badge = document.getElementById('pendingBadge');
-  const tabBadge = document.getElementById('pendingBadge');
-
+  if (!badge) return;
   if (pendingRequests.length > 0) {
     badge.textContent = pendingRequests.length;
     badge.classList.remove('hidden');
@@ -652,6 +635,7 @@ function updatePendingBadge() {
 
 // ===== DIRECT MESSAGES =====
 function openDM(user) {
+  if (!user || !user.id) return;
   activeDMUser = user;
   activeServer = null;
   activeChannel = null;
@@ -671,12 +655,10 @@ function openDM(user) {
 
   showView('dm');
 
-  // Update nav
   document.getElementById('navFriends').classList.remove('active');
   document.getElementById('navDMs').classList.add('active');
   renderDMContacts();
 
-  // Load messages
   safeEmit('get-dms', { userId: user.id, limit: 50 }, (response) => {
     if (response.success) {
       renderMessages(response.messages, 'dmMessagesList', true);
@@ -733,18 +715,14 @@ function createServer() {
       document.getElementById('newServerName').value = '';
       showToast('Sunucu oluşturuldu!', 'success');
     } else {
-      showToast(response.error, 'error');
+      showToast(response.error || 'Sunucu oluşturulamadı', 'error');
     }
   });
 }
 
 function joinServer() {
-  const rawCode = document.getElementById('inviteCodeInput').value;
-  const code = rawCode.trim().replace(/\s+/g, '');
-
+  const code = document.getElementById('inviteCodeInput').value.trim().replace(/\s+/g, '');
   if (!code) return showToast('Davet kodu gerekli', 'error');
-
-  console.log('🔗 Katılma denemesi, kod:', code);
 
   safeEmit('join-server', { inviteCode: code }, (response) => {
     if (response.success) {
@@ -755,7 +733,6 @@ function joinServer() {
       document.getElementById('inviteCodeInput').value = '';
       showToast(`"${response.server.name}" sunucusuna katıldın!`, 'success');
     } else {
-      console.error('❌ Katılma hatası:', response.error);
       showToast(response.error || 'Sunucuya katılınamadı', 'error');
     }
   });
@@ -763,13 +740,9 @@ function joinServer() {
 
 function showInviteModal() {
   if (!activeServer) return;
-
-  // Sunucu bilgilerini yeniden çek (güncel invite_code için)
   const serverData = servers.find(s => s.id === activeServer.id);
   const code = serverData ? serverData.invite_code : activeServer.invite_code;
-
-  console.log('📋 Davet kodu:', code);
-  document.getElementById('inviteCodeDisplay').value = code || 'Kod bulunamadı';
+  document.getElementById('inviteCodeDisplay').value = code || '';
   document.getElementById('inviteModal').classList.remove('hidden');
   closeServerMenu();
 }
@@ -777,14 +750,7 @@ function showInviteModal() {
 function copyInviteCode() {
   const input = document.getElementById('inviteCodeDisplay');
   const code = input.value;
-
-  if (!code || code === 'Kod bulunamadı') {
-    showToast('Davet kodu bulunamadı', 'error');
-    return;
-  }
-
-  input.select();
-  input.setSelectionRange(0, 99999);
+  if (!code) return showToast('Davet kodu bulunamadı', 'error');
 
   navigator.clipboard.writeText(code).then(() => {
     const btn = document.getElementById('copyBtn');
@@ -792,13 +758,9 @@ function copyInviteCode() {
     showToast('Davet kodu kopyalandı: ' + code, 'success');
     setTimeout(() => { btn.innerHTML = '<i class="fas fa-copy"></i> Kopyala'; }, 3000);
   }).catch(() => {
-    // Fallback
-    try {
-      document.execCommand('copy');
-      showToast('Davet kodu kopyalandı!', 'success');
-    } catch (e) {
-      showToast('Kopyalama başarısız, kodu manuel kopyalayın: ' + code, 'error');
-    }
+    input.select();
+    document.execCommand('copy');
+    showToast('Kopyalandı!', 'success');
   });
 }
 
@@ -837,7 +799,7 @@ function createChannel() {
       document.getElementById('newChannelName').value = '';
       showToast('Kanal oluşturuldu!', 'success');
     } else {
-      showToast(response.error, 'error');
+      showToast(response.error || 'Kanal oluşturulamadı', 'error');
     }
   });
 }
@@ -853,6 +815,8 @@ function sendCurrentMessage() {
       input.value = '';
       input.style.height = 'auto';
       socket.emit('typing-stop', { channelId: activeChannel.id });
+    } else {
+      showToast(response.error || 'Mesaj gönderilemedi', 'error');
     }
   });
 }
@@ -866,18 +830,13 @@ function sendCurrentDM() {
     if (response.success) {
       input.value = '';
       input.style.height = 'auto';
-
-      // Update DM contacts
       const existing = dmContacts.find(c => c.contact_id === activeDMUser.id);
       if (!existing) {
-        dmContacts.unshift({
-          contact_id: activeDMUser.id,
-          username: activeDMUser.username,
-          avatar: activeDMUser.avatar,
-          status: activeDMUser.status
-        });
+        dmContacts.unshift({ contact_id: activeDMUser.id, username: activeDMUser.username, status: activeDMUser.status });
         renderDMContacts();
       }
+    } else {
+      showToast(response.error || 'Mesaj gönderilemedi', 'error');
     }
   });
 }
@@ -887,28 +846,24 @@ function startEditMessage(messageId) {
   if (!msgEl) return;
 
   const contentEl = msgEl.querySelector('.message-content');
-  const currentContent = contentEl.textContent.replace('(düzenlendi)', '').trim();
+  const currentContent = contentEl.innerText.replace('(düzenlendi)', '').trim();
 
   contentEl.innerHTML = `
     <input type="text" class="edit-input" value="${escapeHtml(currentContent)}"
-           style="width:100%;padding:8px;background:var(--bg-tertiary);border:1px solid var(--brand-color);border-radius:4px;color:var(--text-normal);font-size:15px;font-family:'Inter',sans-serif;outline:none;">
+      style="width:100%;padding:8px;background:var(--bg-tertiary);border:1px solid var(--brand-color);border-radius:4px;color:var(--text-normal);font-size:15px;font-family:'Inter',sans-serif;outline:none;">
     <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">ESC iptal • Enter kaydet</div>
   `;
 
-  const input = contentEl.querySelector('.edit-input');
-  input.focus();
-  input.setSelectionRange(input.value.length, input.value.length);
+  const editInput = contentEl.querySelector('.edit-input');
+  editInput.focus();
+  editInput.setSelectionRange(editInput.value.length, editInput.value.length);
 
-  input.addEventListener('keydown', (e) => {
+  editInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      const newContent = input.value.trim();
-      if (newContent && newContent !== currentContent) {
-        socket.emit('edit-message', {
-          messageId,
-          channelId: activeChannel.id,
-          content: newContent
-        }, () => {});
+      const newContent = editInput.value.trim();
+      if (newContent && newContent !== currentContent && activeChannel) {
+        safeEmit('edit-message', { messageId, channelId: activeChannel.id, content: newContent }, () => {});
       }
       contentEl.textContent = newContent || currentContent;
     } else if (e.key === 'Escape') {
@@ -919,17 +874,18 @@ function startEditMessage(messageId) {
 
 function startDeleteMessage(messageId, channelId) {
   if (!confirm('Bu mesajı silmek istediğine emin misin?')) return;
-
   if (channelId) {
-    socket.emit('delete-message', { messageId, channelId }, () => {});
+    safeEmit('delete-message', { messageId, channelId }, () => {});
   }
 }
 
 function toggleReaction(messageId, emoji, channelId) {
   const msgEl = document.querySelector(`[data-message-id="${messageId}"]`);
-  const existingReaction = msgEl?.querySelector(`.reaction[onclick*="'${emoji}'"]`);
+  if (!msgEl) return;
+  const reactionEl = msgEl.querySelector(`.reaction`);
+  const isActive = reactionEl && reactionEl.classList.contains('active');
 
-  if (existingReaction?.classList.contains('active')) {
+  if (isActive) {
     socket.emit('remove-reaction', { messageId, channelId, emoji });
   } else {
     socket.emit('add-reaction', { messageId, channelId, emoji });
@@ -945,7 +901,6 @@ function showReactionPicker(messageId) {
 
 // ===== INPUT LISTENERS =====
 function setupInputListeners() {
-  // Channel message input
   const msgInput = document.getElementById('messageInput');
   msgInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -955,11 +910,8 @@ function setupInputListeners() {
   });
 
   msgInput.addEventListener('input', () => {
-    // Auto resize
     msgInput.style.height = 'auto';
     msgInput.style.height = Math.min(msgInput.scrollHeight, 200) + 'px';
-
-    // Typing indicator
     if (activeChannel) {
       socket.emit('typing-start', { channelId: activeChannel.id });
       clearTimeout(typingTimeout);
@@ -969,7 +921,6 @@ function setupInputListeners() {
     }
   });
 
-  // DM message input
   const dmInput = document.getElementById('dmMessageInput');
   dmInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -983,83 +934,68 @@ function setupInputListeners() {
     dmInput.style.height = Math.min(dmInput.scrollHeight, 200) + 'px';
   });
 
-  // File upload
   document.getElementById('fileInput').addEventListener('change', handleFileUpload);
   document.getElementById('dmFileInput').addEventListener('change', handleDMFileUpload);
+
+  // Search input
+  document.getElementById('searchUserInput').addEventListener('input', searchUsers);
+
+  // Enter to join/create
+  document.getElementById('newServerName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createServer();
+  });
+  document.getElementById('inviteCodeInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinServer();
+  });
+  document.getElementById('newChannelName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') createChannel();
+  });
 }
 
 function handleFileUpload(e) {
   const file = e.target.files[0];
-  if (!file) return;
-
+  if (!file || !activeChannel) return;
   const formData = new FormData();
   formData.append('file', file);
-
   fetch('/api/upload', { method: 'POST', body: formData })
     .then(r => r.json())
     .then(data => {
-      if (data.url) {
-        socket.emit('send-message', {
-          channelId: activeChannel.id,
-          content: file.name,
-          type: 'file',
-          fileUrl: data.url
-        }, () => {});
-      }
+      if (data.url) safeEmit('send-message', { channelId: activeChannel.id, content: file.name, type: 'file', fileUrl: data.url }, () => {});
     })
     .catch(() => showToast('Dosya yükleme başarısız', 'error'));
-
   e.target.value = '';
 }
 
 function handleDMFileUpload(e) {
   const file = e.target.files[0];
-  if (!file) return;
-
+  if (!file || !activeDMUser) return;
   const formData = new FormData();
   formData.append('file', file);
-
   fetch('/api/upload', { method: 'POST', body: formData })
     .then(r => r.json())
     .then(data => {
-      if (data.url) {
-        socket.emit('send-dm', {
-          receiverId: activeDMUser.id,
-          content: file.name,
-          type: 'file',
-          fileUrl: data.url
-        }, () => {});
-      }
+      if (data.url) safeEmit('send-dm', { receiverId: activeDMUser.id, content: file.name, type: 'file', fileUrl: data.url }, () => {});
     });
-
   e.target.value = '';
 }
 
 // ===== SOCKET LISTENERS =====
 function setupSocketListeners() {
-  // New channel message
   socket.on('new-message', (data) => {
     if (activeChannel && data.channelId === activeChannel.id) {
       appendMessage(data.message, 'messagesList');
     }
   });
 
-  // New DM
   socket.on('new-dm', (data) => {
     if (activeDMUser && data.senderId === activeDMUser.id) {
       appendMessage(data.message, 'dmMessagesList', true);
     }
-
-    // Update contacts
-    socket.emit('get-dm-contacts', (response) => {
-      if (response.success) {
-        dmContacts = response.contacts;
-        renderDMContacts();
-      }
+    safeEmit('get-dm-contacts', (response) => {
+      if (response.success) { dmContacts = response.contacts; renderDMContacts(); }
     });
   });
 
-  // Message edited
   socket.on('message-edited', (data) => {
     if (activeChannel && data.channelId === activeChannel.id) {
       const msgEl = document.querySelector(`[data-message-id="${data.message.id}"]`);
@@ -1070,20 +1006,14 @@ function setupSocketListeners() {
     }
   });
 
-  // Message deleted
   socket.on('message-deleted', (data) => {
     const msgEl = document.querySelector(`[data-message-id="${data.messageId}"]`);
-    if (msgEl) {
-      msgEl.style.animation = 'fadeOut 0.3s ease forwards';
-      setTimeout(() => msgEl.remove(), 300);
-    }
+    if (msgEl) msgEl.remove();
   });
 
-  // Reactions
   socket.on('reaction-added', (data) => {
     if (activeChannel && data.channelId === activeChannel.id) {
-      // Reload messages for simplicity
-      socket.emit('get-messages', { channelId: activeChannel.id }, (response) => {
+      safeEmit('get-messages', { channelId: activeChannel.id }, (response) => {
         if (response.success) renderMessages(response.messages, 'messagesList');
       });
     }
@@ -1091,18 +1021,16 @@ function setupSocketListeners() {
 
   socket.on('reaction-removed', (data) => {
     if (activeChannel && data.channelId === activeChannel.id) {
-      socket.emit('get-messages', { channelId: activeChannel.id }, (response) => {
+      safeEmit('get-messages', { channelId: activeChannel.id }, (response) => {
         if (response.success) renderMessages(response.messages, 'messagesList');
       });
     }
   });
 
-  // Typing
   socket.on('user-typing', (data) => {
     if (activeChannel && data.channelId === activeChannel.id) {
-      const indicator = document.getElementById('typingIndicator');
       document.getElementById('typingText').textContent = `${data.username} yazıyor...`;
-      indicator.classList.remove('hidden');
+      document.getElementById('typingIndicator').classList.remove('hidden');
     }
   });
 
@@ -1112,12 +1040,13 @@ function setupSocketListeners() {
     }
   });
 
-  // Member events
   socket.on('member-joined', (data) => {
     if (activeServer && data.serverId === activeServer.id) {
-      activeServer.members.push(data.member);
-      renderMembers(activeServer.members);
-      showToast(`${data.member.username} sunucuya katıldı!`, 'info');
+      if (!activeServer.members.find(m => m.id === data.member.id)) {
+        activeServer.members.push(data.member);
+        renderMembers(activeServer.members);
+        showToast(`${data.member.username} sunucuya katıldı!`, 'info');
+      }
     }
   });
 
@@ -1131,28 +1060,23 @@ function setupSocketListeners() {
   socket.on('member-status-changed', (data) => {
     if (activeServer && data.serverId === activeServer.id) {
       const member = activeServer.members.find(m => m.id === data.userId);
-      if (member) {
-        member.status = data.status;
-        renderMembers(activeServer.members);
-      }
+      if (member) { member.status = data.status; renderMembers(activeServer.members); }
     }
   });
 
   socket.on('member-updated', (data) => {
     if (activeServer && data.serverId === activeServer.id) {
       const member = activeServer.members.find(m => m.id === data.member.id);
-      if (member) {
-        Object.assign(member, data.member);
-        renderMembers(activeServer.members);
-      }
+      if (member) { Object.assign(member, data.member); renderMembers(activeServer.members); }
     }
   });
 
-  // Channel events
   socket.on('channel-created', (data) => {
     if (activeServer && data.serverId === activeServer.id) {
-      activeServer.channels.push(data.channel);
-      renderChannelList(activeServer);
+      if (!activeServer.channels.find(c => c.id === data.channel.id)) {
+        activeServer.channels.push(data.channel);
+        renderChannelList(activeServer);
+      }
     }
   });
 
@@ -1161,6 +1085,7 @@ function setupSocketListeners() {
       activeServer.channels = activeServer.channels.filter(c => c.id !== data.channelId);
       renderChannelList(activeServer);
       if (activeChannel?.id === data.channelId) {
+        activeChannel = null;
         if (activeServer.channels.length > 0) selectChannel(activeServer.channels[0]);
         else showView('welcome');
       }
@@ -1174,7 +1099,6 @@ function setupSocketListeners() {
     showToast('Sunucu silindi', 'info');
   });
 
-  // Friend events
   socket.on('friend-request-received', (data) => {
     pendingRequests.push(data);
     updatePendingBadge();
@@ -1199,83 +1123,98 @@ function setupSocketListeners() {
 
 function appendMessage(msg, containerId, isDM = false) {
   const list = document.getElementById(containerId);
+  if (!list) return;
+
   const messagesContainer = document.getElementById(isDM ? 'dmMessagesContainer' : 'messagesContainer');
-  const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 100;
+  const isAtBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < 150;
 
   const lastMsg = list.lastElementChild;
   const sameAuthor = lastMsg && lastMsg.dataset.userId === (msg.user_id || msg.sender_id);
-  const withinTime = lastMsg && (new Date() - new Date(lastMsg.dataset.time || 0)) < 5 * 60 * 1000;
+  const withinTime = lastMsg && (Date.now() - new Date(lastMsg.dataset.time || 0)) < 5 * 60 * 1000;
   const isGrouped = sameAuthor && withinTime;
 
-  const div = document.createElement('div');
-  div.className = `message ${isGrouped ? '' : 'message-start'}`;
-  div.dataset.messageId = msg.id;
-  div.dataset.userId = msg.user_id || msg.sender_id;
-  div.dataset.time = msg.created_at;
-
-  const isOwn = (msg.user_id || msg.sender_id) === currentUser.id;
-
-  let contentHtml = formatMessage(msg.content);
-  if (msg.file_url) {
-    if (/\.(jpg|jpeg|png|gif|webp)$/i.test(msg.file_url)) {
-      contentHtml += `<br><img src="${msg.file_url}" class="message-image">`;
-    } else {
-      contentHtml += `<br><a href="${msg.file_url}" target="_blank"><i class="fas fa-file"></i> ${msg.file_url.split('/').pop()}</a>`;
-    }
-  }
-
-  div.innerHTML = `
-    <div class="message-avatar" style="background: ${getAvatarColor(msg.username || '')}">
-      ${(msg.username || '?').charAt(0).toUpperCase()}
-    </div>
-    <div class="message-body">
-      <div class="message-header">
-        <span class="message-author">${escapeHtml(msg.username || 'Bilinmeyen')}</span>
-        <span class="message-timestamp">${formatTimestamp(msg.created_at)}</span>
-      </div>
-      <div class="message-content">${contentHtml}</div>
-    </div>
-    ${isOwn ? `
-      <div class="message-actions">
-        <button class="message-action-btn" onclick="startEditMessage('${msg.id}')"><i class="fas fa-edit"></i></button>
-        <button class="message-action-btn" onclick="startDeleteMessage('${msg.id}', '${isDM ? '' : activeChannel?.id}')"><i class="fas fa-trash"></i></button>
-      </div>
-    ` : ''}
-  `;
-
+  const div = createMessageElement(msg, isGrouped, isDM);
   list.appendChild(div);
 
-  if (isAtBottom) {
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
-  }
+  if (isAtBottom) messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 // ===== GLOBAL LISTENERS =====
 function setupGlobalListeners() {
-  // Close menus on click outside
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.server-dropdown') && !e.target.closest('.server-dropdown-btn')) {
-      closeServerMenu();
-    }
-    if (!e.target.closest('.status-menu') && !e.target.closest('.user-controls button')) {
-      document.getElementById('statusMenu').classList.add('hidden');
-    }
-    if (!e.target.closest('.emoji-picker') && !e.target.closest('.input-action')) {
-      document.getElementById('emojiPicker').classList.add('hidden');
-    }
-    if (!e.target.closest('.context-menu')) {
-      document.getElementById('contextMenu').classList.add('hidden');
-    }
+  document.getElementById('homeBtn').addEventListener('click', showHome);
+  document.getElementById('addServerBtn').addEventListener('click', showServerModal);
+  document.getElementById('navFriends').addEventListener('click', () => showFriends('all'));
+  document.getElementById('navDMs').addEventListener('click', showDMList);
+  document.getElementById('newDMBtn').addEventListener('click', showSearchModal);
+  document.getElementById('searchBarBtn').addEventListener('click', showSearchModal);
+  document.getElementById('serverDropdownBtn').addEventListener('click', toggleServerMenu);
+  document.getElementById('inviteBtn').addEventListener('click', showInviteModal);
+  document.getElementById('createChannelBtn').addEventListener('click', showCreateChannelModal);
+  document.getElementById('createChannelBtn2').addEventListener('click', showCreateChannelModal);
+  document.getElementById('leaveServerBtn').addEventListener('click', handleLeaveServer);
+  document.getElementById('statusMenuBtn').addEventListener('click', toggleStatusMenu);
+  document.getElementById('settingsBtn').addEventListener('click', showSettingsModal);
+  document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+  document.getElementById('toggleMembersBtn').addEventListener('click', toggleMemberSidebar);
+  document.getElementById('pinnedBtn').addEventListener('click', showPinnedMessages);
+  document.getElementById('fileUploadBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+  document.getElementById('dmFileUploadBtn').addEventListener('click', () => document.getElementById('dmFileInput').click());
+  document.getElementById('emojiBtn').addEventListener('click', toggleEmojiPicker);
+  document.getElementById('dmEmojiBtn').addEventListener('click', toggleEmojiPicker);
+  document.getElementById('sendMsgBtn').addEventListener('click', sendCurrentMessage);
+  document.getElementById('sendDMBtn').addEventListener('click', sendCurrentDM);
+  document.getElementById('copyBtn').addEventListener('click', copyInviteCode);
+  document.getElementById('createServerBtn').addEventListener('click', createServer);
+  document.getElementById('joinServerBtn').addEventListener('click', joinServer);
+  document.getElementById('createChannelConfirmBtn').addEventListener('click', createChannel);
+  document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+  document.getElementById('ctxEdit').addEventListener('click', editSelectedMessage);
+  document.getElementById('ctxDelete').addEventListener('click', deleteSelectedMessage);
+  document.getElementById('ctxCopy').addEventListener('click', copyMessageContent);
+
+  // Welcome butonları
+  document.getElementById('welcomeCreateBtn').addEventListener('click', showServerModal);
+  document.getElementById('welcomeJoinBtn').addEventListener('click', showJoinModal);
+
+  // Modal tab butonları
+  document.querySelectorAll('#serverModalTabs .modal-tab').forEach((tab, i) => {
+    tab.addEventListener('click', () => switchServerModalTab(i === 0 ? 'create' : 'join'));
   });
 
-  // Close modal on overlay click
+  // Status seçenekleri
+  document.querySelectorAll('.status-option[data-status]').forEach(opt => {
+    opt.addEventListener('click', () => changeStatus(opt.dataset.status));
+  });
+
+  // Modal kapatma butonları
+  document.querySelectorAll('.modal-close').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.closest('.modal-overlay').classList.add('hidden');
+    });
+  });
+
+  // Arkadaş sekme butonları
+  document.getElementById('tabAll').addEventListener('click', () => showFriends('all'));
+  document.getElementById('tabOnline').addEventListener('click', () => showFriends('online'));
+  document.getElementById('tabPending').addEventListener('click', () => showFriends('pending'));
+  document.getElementById('tabAdd').addEventListener('click', () => showFriends('add'));
+
+  // Dışarı tıklayınca kapat
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.server-dropdown') && !e.target.closest('#serverDropdownBtn')) closeServerMenu();
+    if (!e.target.closest('.status-menu') && !e.target.closest('#statusMenuBtn')) document.getElementById('statusMenu').classList.add('hidden');
+    if (!e.target.closest('.emoji-picker') && !e.target.closest('#emojiBtn') && !e.target.closest('#dmEmojiBtn') && !e.target.closest('.message-action-btn')) document.getElementById('emojiPicker').classList.add('hidden');
+    if (!e.target.closest('.context-menu')) document.getElementById('contextMenu').classList.add('hidden');
+  });
+
+  // Modal overlay tıklama
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) overlay.classList.add('hidden');
     });
   });
 
-  // ESC to close modals
+  // ESC tuşu
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => m.classList.add('hidden'));
@@ -1283,20 +1222,16 @@ function setupGlobalListeners() {
       document.getElementById('contextMenu').classList.add('hidden');
     }
   });
+
+  // Clear file preview
+  const clearFileBtn = document.getElementById('clearFileBtn');
+  if (clearFileBtn) clearFileBtn.addEventListener('click', clearFilePreview);
 }
 
 // ===== UI HELPERS =====
-function toggleServerMenu() {
-  document.getElementById('serverDropdown').classList.toggle('hidden');
-}
-
-function closeServerMenu() {
-  document.getElementById('serverDropdown').classList.add('hidden');
-}
-
-function toggleStatusMenu() {
-  document.getElementById('statusMenu').classList.toggle('hidden');
-}
+function toggleServerMenu() { document.getElementById('serverDropdown').classList.toggle('hidden'); }
+function closeServerMenu() { document.getElementById('serverDropdown').classList.add('hidden'); }
+function toggleStatusMenu() { document.getElementById('statusMenu').classList.toggle('hidden'); }
 
 function changeStatus(status) {
   currentUser.status = status;
@@ -1310,9 +1245,7 @@ function toggleMemberSidebar() {
   document.getElementById('membersSidebar').classList.toggle('hidden');
 }
 
-function closeModal(id) {
-  document.getElementById(id).classList.add('hidden');
-}
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
 function showSettingsModal() {
   document.getElementById('settingsUsername').value = currentUser.username;
@@ -1323,7 +1256,6 @@ function showSettingsModal() {
 function saveSettings() {
   const username = document.getElementById('settingsUsername').value.trim();
   const customStatus = document.getElementById('settingsCustomStatus').value.trim();
-
   safeEmit('update-profile', { username, custom_status: customStatus }, (response) => {
     if (response.success) {
       currentUser = response.user;
@@ -1331,7 +1263,7 @@ function saveSettings() {
       closeModal('settingsModal');
       showToast('Profil güncellendi!', 'success');
     } else {
-      showToast(response.error, 'error');
+      showToast(response.error || 'Güncellenemedi', 'error');
     }
   });
 }
@@ -1347,75 +1279,61 @@ let searchTimeout;
 function searchUsers() {
   clearTimeout(searchTimeout);
   const query = document.getElementById('searchUserInput').value.trim();
-
-  if (query.length < 1) {
-    document.getElementById('searchResults').innerHTML = '';
-    return;
-  }
+  if (query.length < 1) { document.getElementById('searchResults').innerHTML = ''; return; }
 
   searchTimeout = setTimeout(() => {
     safeEmit('search-users', { query }, (response) => {
       const container = document.getElementById('searchResults');
       container.innerHTML = '';
-
       if (!response || !response.success) {
         container.innerHTML = '<div class="empty-state"><p>Arama yapılamadı</p></div>';
         return;
       }
-
       if (response.users.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>Kullanıcı bulunamadı</p></div>';
         return;
       }
-
       response.users.forEach(user => {
         const div = document.createElement('div');
         div.className = 'search-result-item';
-        const safeUsername = escapeHtml(user.username);
-        const safeId = escapeHtml(user.id);
-        const safeStatus = escapeHtml(user.status || 'offline');
-
         div.innerHTML = `
           <div class="result-avatar" style="background: ${getAvatarColor(user.username)}">
             ${user.username.charAt(0).toUpperCase()}
           </div>
           <div class="result-info">
-            <span class="result-name">${safeUsername}</span>
+            <span class="result-name">${escapeHtml(user.username)}</span>
             <span class="result-status">${getStatusText(user.status)}</span>
           </div>
           <div style="display:flex;gap:6px;">
-            <button onclick="event.stopPropagation(); sendFriendRequestById('${safeId}','${safeUsername}')">
+            <button onclick="event.stopPropagation();sendFriendRequestByName('${escapeHtml(user.username)}')">
               <i class="fas fa-user-plus"></i> Ekle
             </button>
-            <button onclick="event.stopPropagation(); startDMFromSearch('${safeId}','${safeUsername}','${safeStatus}')">
+            <button onclick="event.stopPropagation();startDMFromSearch('${user.id}','${escapeHtml(user.username)}','${user.status || 'offline'}')">
               <i class="fas fa-comment"></i> Mesaj
             </button>
-          </div>
-        `;
+          </div>`;
         container.appendChild(div);
       });
     });
   }, 300);
 }
 
-function sendFriendRequestById(userId, username) {
+function sendFriendRequestByName(username) {
   safeEmit('send-friend-request', { username }, (response) => {
-    if (response.success) {
-      showToast(`${username} kullanıcısına arkadaşlık isteği gönderildi!`, 'success');
-    } else {
-      showToast(response.error || 'İstek gönderilemedi', 'error');
-    }
+    if (response.success) showToast(`${username} kullanıcısına istek gönderildi!`, 'success');
+    else showToast(response.error || 'İstek gönderilemedi', 'error');
   });
 }
 
 function startDMFromSearch(userId, username, status) {
   closeModal('searchModal');
-  openDM({ id: userId, username: username, status: status || 'offline' });
+  openDM({ id: userId, username, status: status || 'offline' });
 }
 
 function handleLogout() {
-  socket.emit('update-status', { status: 'offline' }, () => {});
+  socket.emit('update-status', { status: 'offline' });
   isLoggedIn = false;
+  loginDone = false;
   sessionStorage.clear();
   window.location.href = '/';
 }
@@ -1425,12 +1343,13 @@ function showContextMenu(e, msg, isOwn) {
   const menu = document.getElementById('contextMenu');
   selectedMessageId = msg.id;
   selectedMessageChannelId = activeChannel?.id;
-
   document.getElementById('ctxEdit').style.display = isOwn ? 'flex' : 'none';
   document.getElementById('ctxDelete').style.display = isOwn ? 'flex' : 'none';
 
-  menu.style.left = e.clientX + 'px';
-  menu.style.top = e.clientY + 'px';
+  const x = Math.min(e.clientX, window.innerWidth - 200);
+  const y = Math.min(e.clientY, window.innerHeight - 120);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
   menu.classList.remove('hidden');
 }
 
@@ -1447,16 +1366,14 @@ function deleteSelectedMessage() {
 function copyMessageContent() {
   const msgEl = document.querySelector(`[data-message-id="${selectedMessageId}"]`);
   if (msgEl) {
-    const text = msgEl.querySelector('.message-content').textContent;
+    const text = msgEl.querySelector('.message-content').innerText;
     navigator.clipboard.writeText(text);
     showToast('Mesaj kopyalandı', 'info');
   }
   document.getElementById('contextMenu').classList.add('hidden');
 }
 
-function showPinnedMessages() {
-  showToast('Sabitleme özelliği yakında!', 'info');
-}
+function showPinnedMessages() { showToast('Sabitleme özelliği yakında!', 'info'); }
 
 // ===== EMOJI PICKER =====
 const emojis = [
@@ -1483,16 +1400,15 @@ function initEmojiPicker() {
     span.onclick = () => insertEmoji(emoji);
     grid.appendChild(span);
   });
+
+  // Emoji arama input listener burada bağlanıyor
+  document.getElementById('emojiSearch').addEventListener('input', filterEmojis);
 }
 
-function toggleEmojiPicker() {
-  document.getElementById('emojiPicker').classList.toggle('hidden');
-}
+function toggleEmojiPicker() { document.getElementById('emojiPicker').classList.toggle('hidden'); }
 
 function insertEmoji(emoji) {
   const picker = document.getElementById('emojiPicker');
-
-  // If targeting a message for reaction
   if (picker.dataset.targetMessage) {
     const channelId = activeChannel?.id || '';
     socket.emit('add-reaction', { messageId: picker.dataset.targetMessage, channelId, emoji });
@@ -1500,12 +1416,7 @@ function insertEmoji(emoji) {
     picker.classList.add('hidden');
     return;
   }
-
-  // Otherwise insert into input
-  const input = activeView === 'dm'
-    ? document.getElementById('dmMessageInput')
-    : document.getElementById('messageInput');
-
+  const input = activeView === 'dm' ? document.getElementById('dmMessageInput') : document.getElementById('messageInput');
   const start = input.selectionStart;
   const end = input.selectionEnd;
   input.value = input.value.substring(0, start) + emoji + input.value.substring(end);
@@ -1521,28 +1432,24 @@ function filterEmojis() {
   });
 }
 
+// emojiSearch input listener - initEmojiPicker içine taşındı
+
 // ===== UTILITY FUNCTIONS =====
 function escapeHtml(text) {
+  if (!text) return '';
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = String(text);
   return div.innerHTML;
 }
 
 function formatMessage(text) {
   if (!text) return '';
   let html = escapeHtml(text);
-
-  // Bold **text**
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  // Italic *text*
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  // Code `text`
   html = html.replace(/`(.*?)`/g, '<code style="padding:2px 6px;background:var(--bg-tertiary);border-radius:3px;font-size:13px;">$1</code>');
-  // Links
-  html = html.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
-  // Line breaks
+  html = html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
   html = html.replace(/\n/g, '<br>');
-
   return html;
 }
 
@@ -1550,32 +1457,20 @@ function formatTimestamp(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
   const diff = now - date;
-
   if (diff < 60000) return 'Az önce';
   if (diff < 3600000) return `${Math.floor(diff / 60000)} dk önce`;
-
   const isToday = date.toDateString() === now.toDateString();
   const isYesterday = new Date(now - 86400000).toDateString() === date.toDateString();
-
   const time = date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-
   if (isToday) return `Bugün ${time}`;
   if (isYesterday) return `Dün ${time}`;
-  return date.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ` ${time}`;
+  return date.toLocaleDateString('tr-TR') + ` ${time}`;
 }
 
 function getAvatarColor(name) {
-  const colors = [
-    '#5865F2', '#EB459E', '#57F287', '#FEE75C', '#ED4245',
-    '#F47B67', '#E78338', '#45DDC0', '#9B84EE', '#F47FFF',
-    '#3BA55C', '#FAA61A', '#E67E22', '#E74C3C', '#9B59B6',
-    '#1ABC9C', '#2ECC71', '#3498DB', '#E91E63', '#F44336'
-  ];
-
+  const colors = ['#5865F2','#EB459E','#57F287','#FEE75C','#ED4245','#F47B67','#E78338','#45DDC0','#9B84EE','#F47FFF','#3BA55C','#FAA61A','#E67E22','#E74C3C','#9B59B6','#1ABC9C','#2ECC71','#3498DB','#E91E63','#F44336'];
   let hash = 0;
-  for (let i = 0; i < (name || '').length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
+  for (let i = 0; i < (name || '').length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
 }
 
@@ -1601,12 +1496,9 @@ function showToast(message, type = 'info') {
   const container = document.getElementById('toastContainer');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-
   const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', info: 'fa-info-circle' };
   toast.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i> ${message}`;
-
   container.appendChild(toast);
-
   setTimeout(() => {
     toast.classList.add('hiding');
     setTimeout(() => toast.remove(), 300);
@@ -1617,29 +1509,7 @@ function clearFilePreview() {
   document.getElementById('filePreview').classList.add('hidden');
 }
 
-// Add fadeOut animation
+// Animasyon
 const style = document.createElement('style');
-style.textContent = `@keyframes fadeOut { from { opacity: 1; max-height: 200px; } to { opacity: 0; max-height: 0; padding: 0; margin: 0; } }`;
+style.textContent = `@keyframes fadeOut { from { opacity:1; } to { opacity:0; } }`;
 document.head.appendChild(style);
-
-// ===== DISCONNECT & RECONNECT =====
-socket.on('disconnect', (reason) => {
-  console.log('🔴 Bağlantı koptu:', reason);
-  isLoggedIn = false;
-  if (reason !== 'io client disconnect') {
-    showToast('Bağlantı koptu, yeniden bağlanılıyor...', 'error');
-  }
-});
-
-socket.io.on('reconnect', (attemptNumber) => {
-  console.log(`🔄 Yeniden bağlandı (deneme: ${attemptNumber})`);
-  // connect eventi zaten doLogin'i tetikleyecek (initApp içinde)
-});
-
-socket.io.on('reconnect_attempt', (attempt) => {
-  console.log(`🔄 Yeniden bağlanma denemesi: ${attempt}`);
-});
-
-socket.io.on('reconnect_failed', () => {
-  showToast('Bağlantı kurulamadı. Sayfayı yenileyin.', 'error');
-});
